@@ -7,21 +7,27 @@ import {
   type RiskSubmission,
   type SubmissionStatus,
 } from '@neo-lloyds/domain';
-import { CLOCK, GRAPH_REPOSITORY, type Clock, type GraphRepository } from '../persistence/ports.js';
+import {
+  CLOCK,
+  GRAPH_REPOSITORY,
+  SUBMISSION_REPOSITORY,
+  type Clock,
+  type GraphRepository,
+  type SubmissionRepository,
+} from '../persistence/ports.js';
 import { AuditService } from '../common/audit.service.js';
 
 /**
- * In-memory submission store for Phase 2. Submissions reference a risk
- * already in the graph; the workflow itself (brief §8) is what's new here —
- * persisting it to its own table is a Phase 4 marketplace concern once
- * listing and capital interest exist to act on it.
+ * Durable from Phase 4: a submission is written through `SubmissionRepository`
+ * (Prisma in production, in-memory in tests), so it survives a restart — it
+ * has to, once `POST /marketplace/listings` needs to read a
+ * READY_FOR_UNDERWRITING submission back to list it.
  */
 @Injectable()
 export class SubmissionService {
-  private readonly submissions = new Map<string, RiskSubmission>();
-
   constructor(
     @Inject(GRAPH_REPOSITORY) private readonly graphRepo: GraphRepository,
+    @Inject(SUBMISSION_REPOSITORY) private readonly submissions: SubmissionRepository,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(AuditService) private readonly audit: AuditService,
   ) {}
@@ -42,19 +48,19 @@ export class SubmissionService {
       createdAt: now,
       updatedAt: now,
     };
-    this.submissions.set(submission.id, submission);
+    const created = await this.submissions.create(submission);
 
     await this.audit.record({
       ctx,
       action: 'submission.create',
       subjectType: 'RiskSubmission',
-      subjectId: submission.id,
+      subjectId: created.id,
       decision: 'ALLOWED',
       reason: `Risk submission drafted for risk ${input.riskId}`,
-      after: submission,
+      after: created,
     });
 
-    return submission;
+    return created;
   }
 
   async advance(
@@ -62,7 +68,7 @@ export class SubmissionService {
     id: string,
     to: SubmissionStatus,
   ): Promise<RiskSubmission> {
-    const before = this.submissions.get(id);
+    const before = await this.submissions.find(id);
     if (!before) throw new NotFoundException('Submission not found');
     requireTenantAccess(ctx, before.organisationId, 'WRITE');
 
@@ -70,12 +76,8 @@ export class SubmissionService {
     // current status; this is the single place the workflow order is enforced.
     requireTransition(before.status, to);
 
-    const after: RiskSubmission = {
-      ...before,
-      status: to,
-      updatedAt: this.clock.now().toISOString(),
-    };
-    this.submissions.set(id, after);
+    const after = await this.submissions.advance(id, to, this.clock.now());
+    if (!after) throw new NotFoundException('Submission not found');
 
     await this.audit.record({
       ctx,
@@ -92,15 +94,13 @@ export class SubmissionService {
   }
 
   async get(ctx: AuthContext, id: string): Promise<RiskSubmission> {
-    const submission = this.submissions.get(id);
+    const submission = await this.submissions.find(id);
     if (!submission) throw new NotFoundException('Submission not found');
     requireTenantAccess(ctx, submission.organisationId, 'READ');
     return submission;
   }
 
   async list(ctx: AuthContext): Promise<RiskSubmission[]> {
-    return [...this.submissions.values()].filter(
-      (s) => s.organisationId === ctx.organisationId,
-    );
+    return this.submissions.listByOrganisation(ctx.organisationId);
   }
 }

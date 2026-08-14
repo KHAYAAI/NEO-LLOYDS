@@ -1,19 +1,30 @@
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import {
+  money,
   provenance,
   type AgentMandate,
   type AuditRecord,
+  type CapitalAppetite,
   type MarketRole,
   type Organisation,
   type RiskEdge,
   type RiskNode,
+  type RiskSubmission,
+  type SubmissionStatus,
+  type UnderwritingApproval,
+  type UnderwritingAssessment,
 } from '@neo-lloyds/domain';
 import type {
   AuditRepository,
   GraphRepository,
   IdentityRepository,
+  MarketplaceRepository,
   StoredCredential,
+  StoredInterest,
+  StoredListing,
+  SubmissionRepository,
+  UnderwritingRepository,
 } from './ports.js';
 
 @Injectable()
@@ -355,5 +366,377 @@ export class PrismaGraphRepository implements GraphRepository {
         provenance: toProvenance(row),
       })),
     };
+  }
+}
+
+@Injectable()
+export class PrismaSubmissionRepository implements SubmissionRepository {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private toDomain(row: {
+    id: string;
+    organisationId: string;
+    riskId: string;
+    title: string;
+    status: string;
+    submittedBy: string;
+    createdAt: Date;
+    updatedAt: Date;
+  }): RiskSubmission {
+    return {
+      id: row.id,
+      organisationId: row.organisationId,
+      riskId: row.riskId,
+      title: row.title,
+      status: row.status as SubmissionStatus,
+      submittedBy: row.submittedBy,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  async create(submission: RiskSubmission): Promise<RiskSubmission> {
+    const row = await this.prisma.riskSubmission.create({
+      data: {
+        id: submission.id,
+        organisationId: submission.organisationId,
+        riskId: submission.riskId,
+        title: submission.title,
+        status: submission.status as never,
+        submittedBy: submission.submittedBy,
+      },
+    });
+    return this.toDomain(row);
+  }
+
+  async advance(
+    id: string,
+    to: SubmissionStatus,
+    _updatedAt: Date,
+  ): Promise<RiskSubmission | undefined> {
+    try {
+      const row = await this.prisma.riskSubmission.update({
+        where: { id },
+        data: { status: to as never },
+      });
+      return this.toDomain(row);
+    } catch {
+      return undefined;
+    }
+  }
+
+  async find(id: string): Promise<RiskSubmission | undefined> {
+    const row = await this.prisma.riskSubmission.findUnique({ where: { id } });
+    return row ? this.toDomain(row) : undefined;
+  }
+
+  async listByOrganisation(organisationId: string): Promise<RiskSubmission[]> {
+    const rows = await this.prisma.riskSubmission.findMany({ where: { organisationId } });
+    return rows.map((row) => this.toDomain(row));
+  }
+}
+
+@Injectable()
+export class PrismaUnderwritingRepository implements UnderwritingRepository {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private assessmentToDomain(row: {
+    id: string;
+    riskId: string;
+    organisationId: string;
+    eligible: boolean;
+    band: string;
+    control: string;
+    requiresHumanApproval: boolean;
+    riskScoreConfidence: number;
+    expectedLossMinor: bigint;
+    currency: string;
+    premiumLowMinor: bigint;
+    premiumHighMinor: bigint;
+    capitalRequirementMinor: bigint;
+    suggestedCapacityMinor: bigint;
+    exclusions: string[];
+    conditions: string[];
+    requiredEvidence: string[];
+    modelVersion: string;
+    assessedAt: Date;
+  }): UnderwritingAssessment & { id: string; organisationId: string } {
+    return {
+      id: row.id,
+      organisationId: row.organisationId,
+      riskId: row.riskId,
+      eligible: row.eligible,
+      band: row.band as UnderwritingAssessment['band'],
+      control: row.control as UnderwritingAssessment['control'],
+      requiresHumanApproval: row.requiresHumanApproval,
+      riskScoreConfidence: row.riskScoreConfidence,
+      expectedLoss: money(Number(row.expectedLossMinor), row.currency),
+      suggestedPremiumRange: {
+        low: money(Number(row.premiumLowMinor), row.currency),
+        high: money(Number(row.premiumHighMinor), row.currency),
+      },
+      capitalRequirement: money(Number(row.capitalRequirementMinor), row.currency),
+      suggestedCapacity: money(Number(row.suggestedCapacityMinor), row.currency),
+      exclusions: row.exclusions,
+      conditions: row.conditions,
+      requiredEvidence: row.requiredEvidence,
+      modelVersion: row.modelVersion,
+      assessedAt: row.assessedAt.toISOString(),
+    };
+  }
+
+  async createAssessment(
+    assessment: UnderwritingAssessment & { id: string; organisationId: string },
+  ) {
+    const row = await this.prisma.underwritingAssessment.create({
+      data: {
+        id: assessment.id,
+        riskId: assessment.riskId,
+        organisationId: assessment.organisationId,
+        eligible: assessment.eligible,
+        band: assessment.band,
+        control: assessment.control,
+        requiresHumanApproval: assessment.requiresHumanApproval,
+        riskScoreConfidence: assessment.riskScoreConfidence,
+        expectedLossMinor: BigInt(assessment.expectedLoss.amountMinor),
+        currency: assessment.expectedLoss.currency,
+        premiumLowMinor: BigInt(assessment.suggestedPremiumRange.low.amountMinor),
+        premiumHighMinor: BigInt(assessment.suggestedPremiumRange.high.amountMinor),
+        capitalRequirementMinor: BigInt(assessment.capitalRequirement.amountMinor),
+        suggestedCapacityMinor: BigInt(assessment.suggestedCapacity.amountMinor),
+        exclusions: [...assessment.exclusions],
+        conditions: [...assessment.conditions],
+        requiredEvidence: [...assessment.requiredEvidence],
+        modelVersion: assessment.modelVersion,
+      },
+    });
+    return this.assessmentToDomain(row);
+  }
+
+  async latestAssessment(riskId: string) {
+    const row = await this.prisma.underwritingAssessment.findFirst({
+      where: { riskId },
+      orderBy: { assessedAt: 'desc' },
+    });
+    return row ? this.assessmentToDomain(row) : undefined;
+  }
+
+  async createApproval(approval: UnderwritingApproval & { id: string; assessmentId: string }) {
+    const row = await this.prisma.underwritingApproval.create({
+      data: {
+        id: approval.id,
+        riskId: approval.riskId,
+        assessmentId: approval.assessmentId,
+        assessmentModelVersion: approval.assessmentModelVersion,
+        approverSubjectId: approval.approverSubjectId,
+        decision: approval.decision,
+        reason: approval.reason,
+      },
+    });
+    return {
+      riskId: row.riskId,
+      assessmentModelVersion: row.assessmentModelVersion,
+      approverSubjectId: row.approverSubjectId,
+      decision: row.decision as UnderwritingApproval['decision'],
+      reason: row.reason,
+      decidedAt: row.decidedAt.toISOString(),
+    };
+  }
+
+  async latestApproval(riskId: string): Promise<UnderwritingApproval | undefined> {
+    const row = await this.prisma.underwritingApproval.findFirst({
+      where: { riskId },
+      orderBy: { decidedAt: 'desc' },
+    });
+    if (!row) return undefined;
+    return {
+      riskId: row.riskId,
+      assessmentModelVersion: row.assessmentModelVersion,
+      approverSubjectId: row.approverSubjectId,
+      decision: row.decision as UnderwritingApproval['decision'],
+      reason: row.reason,
+      decidedAt: row.decidedAt.toISOString(),
+    };
+  }
+}
+
+@Injectable()
+export class PrismaMarketplaceRepository implements MarketplaceRepository {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private listingToDomain(row: {
+    id: string;
+    organisationId: string;
+    submissionId: string;
+    riskId: string;
+    title: string;
+    riskClass: string;
+    jurisdiction: string;
+    capacityMinor: bigint;
+    currency: string;
+    durationDays: number;
+    status: string;
+    listedAt: Date;
+    closedAt: Date | null;
+  }): StoredListing {
+    return {
+      id: row.id,
+      organisationId: row.organisationId,
+      submissionId: row.submissionId,
+      riskId: row.riskId,
+      title: row.title,
+      riskClass: row.riskClass,
+      jurisdiction: row.jurisdiction,
+      capacity: money(Number(row.capacityMinor), row.currency),
+      status: row.status as StoredListing['status'],
+      durationDays: row.durationDays,
+      listedAt: row.listedAt,
+      closedAt: row.closedAt,
+    };
+  }
+
+  async createListing(
+    listing: Omit<StoredListing, 'status' | 'listedAt' | 'closedAt'>,
+  ): Promise<StoredListing> {
+    const row = await this.prisma.marketListing.create({
+      data: {
+        id: listing.id,
+        organisationId: listing.organisationId,
+        submissionId: listing.submissionId,
+        riskId: listing.riskId,
+        title: listing.title,
+        riskClass: listing.riskClass,
+        jurisdiction: listing.jurisdiction,
+        capacityMinor: BigInt(listing.capacity.amountMinor),
+        currency: listing.capacity.currency,
+        durationDays: listing.durationDays,
+      },
+    });
+    return this.listingToDomain(row);
+  }
+
+  async findListing(id: string): Promise<StoredListing | undefined> {
+    const row = await this.prisma.marketListing.findUnique({ where: { id } });
+    return row ? this.listingToDomain(row) : undefined;
+  }
+
+  async findListingBySubmission(submissionId: string): Promise<StoredListing | undefined> {
+    const row = await this.prisma.marketListing.findUnique({ where: { submissionId } });
+    return row ? this.listingToDomain(row) : undefined;
+  }
+
+  async listOpenListings(filter: { riskClass?: string; jurisdiction?: string }): Promise<StoredListing[]> {
+    const rows = await this.prisma.marketListing.findMany({
+      where: {
+        status: 'OPEN',
+        ...(filter.riskClass ? { riskClass: filter.riskClass } : {}),
+        ...(filter.jurisdiction ? { jurisdiction: filter.jurisdiction } : {}),
+      },
+    });
+    return rows.map((row) => this.listingToDomain(row));
+  }
+
+  async setListingStatus(id: string, status: StoredListing['status'], closedAt?: Date): Promise<void> {
+    await this.prisma.marketListing.update({
+      where: { id },
+      data: { status, ...(closedAt ? { closedAt } : {}) },
+    });
+  }
+
+  async upsertAppetite(profile: CapitalAppetite): Promise<CapitalAppetite> {
+    await this.prisma.capitalAppetiteProfile.upsert({
+      where: { organisationId: profile.organisationId },
+      create: {
+        organisationId: profile.organisationId,
+        preferredRiskClasses: [...profile.preferredRiskClasses],
+        maxExposureMinor: BigInt(profile.maxExposure.amountMinor),
+        currency: profile.maxExposure.currency,
+        preferredJurisdictions: [...profile.preferredJurisdictions],
+        minimumReturnBps: profile.minimumReturnBps,
+        maxDurationDays: profile.maxDurationDays,
+        riskTolerance: profile.riskTolerance,
+        concentrationLimitBps: profile.concentrationLimitBps,
+      },
+      update: {
+        preferredRiskClasses: [...profile.preferredRiskClasses],
+        maxExposureMinor: BigInt(profile.maxExposure.amountMinor),
+        currency: profile.maxExposure.currency,
+        preferredJurisdictions: [...profile.preferredJurisdictions],
+        minimumReturnBps: profile.minimumReturnBps,
+        maxDurationDays: profile.maxDurationDays,
+        riskTolerance: profile.riskTolerance,
+        concentrationLimitBps: profile.concentrationLimitBps,
+      },
+    });
+    return profile;
+  }
+
+  async findAppetite(organisationId: string): Promise<CapitalAppetite | undefined> {
+    const row = await this.prisma.capitalAppetiteProfile.findUnique({ where: { organisationId } });
+    if (!row) return undefined;
+    return {
+      organisationId: row.organisationId,
+      preferredRiskClasses: row.preferredRiskClasses,
+      maxExposure: money(Number(row.maxExposureMinor), row.currency),
+      preferredJurisdictions: row.preferredJurisdictions,
+      minimumReturnBps: row.minimumReturnBps,
+      maxDurationDays: row.maxDurationDays,
+      riskTolerance: row.riskTolerance as CapitalAppetite['riskTolerance'],
+      concentrationLimitBps: row.concentrationLimitBps,
+    };
+  }
+
+  async expressInterest(interest: Omit<StoredInterest, 'withdrawnAt'>): Promise<StoredInterest> {
+    const row = await this.prisma.capitalInterest.upsert({
+      where: {
+        listingId_organisationId: {
+          listingId: interest.listingId,
+          organisationId: interest.organisationId,
+        },
+      },
+      create: {
+        id: interest.id,
+        listingId: interest.listingId,
+        organisationId: interest.organisationId,
+        indicativeAmountMinor: BigInt(interest.indicativeAmount.amountMinor),
+        currency: interest.indicativeAmount.currency,
+        note: interest.note,
+      },
+      update: {
+        indicativeAmountMinor: BigInt(interest.indicativeAmount.amountMinor),
+        currency: interest.indicativeAmount.currency,
+        note: interest.note,
+        withdrawnAt: null,
+      },
+    });
+    return {
+      id: row.id,
+      listingId: row.listingId,
+      organisationId: row.organisationId,
+      indicativeAmount: money(Number(row.indicativeAmountMinor), row.currency),
+      note: row.note,
+      expressedAt: row.expressedAt,
+      withdrawnAt: row.withdrawnAt,
+    };
+  }
+
+  async listInterests(listingId: string): Promise<StoredInterest[]> {
+    const rows = await this.prisma.capitalInterest.findMany({ where: { listingId } });
+    return rows.map((row) => ({
+      id: row.id,
+      listingId: row.listingId,
+      organisationId: row.organisationId,
+      indicativeAmount: money(Number(row.indicativeAmountMinor), row.currency),
+      note: row.note,
+      expressedAt: row.expressedAt,
+      withdrawnAt: row.withdrawnAt,
+    }));
+  }
+
+  async withdrawInterest(listingId: string, organisationId: string, at: Date): Promise<void> {
+    await this.prisma.capitalInterest.update({
+      where: { listingId_organisationId: { listingId, organisationId } },
+      data: { withdrawnAt: at },
+    });
   }
 }

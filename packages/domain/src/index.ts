@@ -24,3 +24,4 @@ export * from './scoring.js';
 export * from './analyst.js';
 export * from './submission.js';
 export * from './underwriting.js';
+export * from './marketplace.js';

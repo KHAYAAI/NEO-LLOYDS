@@ -44,9 +44,20 @@ documentation, local deployment, passing tests.
   and what remains a data/expertise dependency rather than a code one
   (uncalibrated thresholds).
 
-## Phase 4 — Marketplace
-Listings, capital-provider appetite (risk classes, max exposure, geography,
-minimum return, duration, tolerance, concentration limits), matching, interest.
+## Phase 4 — Marketplace — **DELIVERED**
+
+- `RiskSubmission`, `UnderwritingAssessment` and `UnderwritingApproval` moved
+  from in-memory maps to Prisma tables — the trigger for this was listing
+  needing to read them back after a restart, exactly as planned.
+- `matchesAppetite()`: deterministic, explicit-reasons matching between a
+  listing and a capital provider's declared appetite (risk classes, max
+  exposure, jurisdictions, minimum return, max duration, tolerance,
+  concentration limit).
+- Listing re-checks underwriting clearance at listing time, not cached.
+  Expressions of interest are explicitly non-binding — Phase 5 is where a
+  real, invariant-bound allocation gets created.
+- See `docs/reports/phase-4.md` for the restart test: full workflow exercised,
+  server killed and restarted, everything confirmed still present.
 
 ## Phase 5 — Syndication
 Allocation across providers with hard invariants: total = 100%, no

@@ -98,6 +98,25 @@ are blocked at `clearance` until a matching `APPROVED` decision exists — this
 is the single choke point later phases (marketplace, syndication) call before
 treating a risk as underwritten. Approvals are held in-memory in Phase 3.
 
+## Marketplace (Phase 4)
+
+Submissions and underwriting assessments/approvals are now durable (Prisma
+tables), not in-memory — this is what makes the listing endpoints below
+correct across a restart.
+
+| Method | Path | Scope / roles | Notes |
+|---|---|---|---|
+| POST | `/marketplace/listings` | `marketplace:list` + originator/broker | Requires the submission is `READY_FOR_UNDERWRITING` and its risk currently has underwriting clearance — both re-checked, not cached. `422 SUBMISSION_NOT_READY` / `NOT_ASSESSED` / `APPROVAL_REQUIRED` / `ALREADY_LISTED` as applicable. |
+| POST | `/marketplace/listings/:id/withdraw` | `marketplace:list` + originator/broker | Owner only |
+| GET | `/marketplace/listings/:id` | `marketplace:read` | Open listings are marketplace-visible to any authenticated caller; non-open listings are tenant-isolated |
+| GET | `/marketplace/listings` | `marketplace:read` | Optional `?riskClass=` / `?jurisdiction=` filters; withdrawn/matched/expired never appear |
+| POST | `/marketplace/appetite` | `marketplace:appetite` + `CAPITAL_PROVIDER` | Replaces any existing profile for the caller's organisation |
+| GET | `/marketplace/appetite` | `marketplace:appetite` | |
+| GET | `/marketplace/appetite/matches` | `marketplace:appetite` | Open listings ranked against the caller's appetite; every non-match carries explicit reasons |
+| POST | `/marketplace/listings/:id/interest` | `marketplace:interest` + `CAPITAL_PROVIDER` | Non-binding. Expressing interest outside declared appetite is allowed and recorded, not blocked |
+| DELETE | `/marketplace/listings/:id/interest` | `marketplace:interest` + `CAPITAL_PROVIDER` | Withdraws the caller's own interest |
+| GET | `/marketplace/listings/:id/interest` | `marketplace:read` | Listing owner only |
+
 ## Errors
 
 Domain invariant violations return `422` with a machine-readable code:
@@ -115,6 +134,9 @@ Domain invariant violations return `422` with a machine-readable code:
 
 Codes: `INVALID_EDGE`, `DEPENDENCY_CYCLE`, `UNKNOWN_NODE`, `INVALID_PROVENANCE`,
 `INVALID_MONEY`, `INVALID_JURISDICTION`, `AGENT_REQUIRES_PRINCIPAL`,
-`AGENT_CHAIN_FORBIDDEN`, `UNKNOWN_NODE_TYPE`, `UNKNOWN_EDGE_TYPE`, `FORBIDDEN`
+`AGENT_CHAIN_FORBIDDEN`, `UNKNOWN_NODE_TYPE`, `UNKNOWN_EDGE_TYPE`,
+`INVALID_SUBMISSION_TRANSITION`, `NOT_ASSESSED`, `APPROVAL_REQUIRED`,
+`STALE_APPROVAL`, `NOT_APPROVED`, `SUBMISSION_NOT_READY`, `ALREADY_LISTED`,
+`LISTING_NOT_OPEN`, `CURRENCY_MISMATCH`, `FORBIDDEN`
 (403). Malformed or unknown request fields return `400`; unauthenticated `401`;
 missing scope or role `403`.

@@ -16,19 +16,23 @@ transferable and financeable — by machines as well as by people. Strategic HQ:
 Johannesburg; the architecture is globally deployable and jurisdiction-neutral
 at its core.
 
-## Status: Phases 1–3 delivered
+## Status: Phases 1–4 delivered
 
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Identity · Risk ontology · Risk graph | **Delivered** |
 | 2 | Risk submission · Deterministic scoring · AI analyst | **Delivered** |
 | 3 | Underwriting: assessment, approval bands, human-approval gate | **Delivered** |
-| 4–11 | Marketplace, syndication, capital ledger, claims, simulation, reinsurance, settlement, agent API | Specified, not built — `docs/roadmap.md` |
+| 4 | Marketplace: listings, capital appetite, matching, interest — submissions and underwriting now durable | **Delivered** |
+| 5–11 | Syndication, capital ledger, claims, simulation, reinsurance, settlement, agent API | Specified, not built — `docs/roadmap.md` |
 
 Each phase is built vertically: domain logic, migrations where applicable,
 API, authn/authz, audit logging, error handling, docs and a passing test
-suite. See `docs/reports/phase-2.md` and `docs/reports/phase-3.md` for what
-each phase depends on externally before it can inform a real decision.
+suite. See `docs/reports/phase-2.md` through `docs/reports/phase-4.md` for
+what each phase depends on externally before it can inform a real decision.
+Phase 4's report includes a verification specifically designed to prove
+durability: a full listing → appetite → match → interest workflow, a server
+restart, and confirmation everything survived it.
 
 ## Quick start
 
@@ -48,7 +52,7 @@ npm -w @neo-lloyds/api run build && npm -w @neo-lloyds/api start
 API on `:3001`, OpenAPI at `/docs`.
 
 ```bash
-npm test        # 103 tests
+npm test        # 117 tests
 npm run typecheck
 npm run lint
 ```

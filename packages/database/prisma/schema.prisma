@@ -63,6 +63,11 @@ model Organisation {
   grantedMandates AgentMandate[]    @relation("MandatePrincipal")
   nodes          RiskNode[]
   auditRecords   AuditRecord[]
+  submissions           RiskSubmission[]
+  underwritingAssessments UnderwritingAssessment[]
+  listings              MarketListing[]
+  capitalAppetite        CapitalAppetiteProfile?
+  capitalInterests       CapitalInterest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -264,4 +269,156 @@ model AuditRecord {
   @@index([actorOrganisationId, at])
   @@index([subjectType, subjectId])
   @@index([action, at])
+}
+
+// -------------------------------------------------- submission (Phase 2/4)
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  ANALYSING
+  SCORED
+  READY_FOR_UNDERWRITING
+}
+
+/// Held in-memory through Phase 3; durable from Phase 4 because market
+/// listing is the first thing that needs to read a submission back after a
+/// restart (docs/reports/phase-4.md).
+model RiskSubmission {
+  id             String           @id @default(uuid())
+  organisationId String
+  organisation   Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  riskId         String
+  title          String
+  status         SubmissionStatus @default(DRAFT)
+  submittedBy    String
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  listing MarketListing?
+
+  @@index([organisationId, status])
+  @@index([riskId])
+}
+
+// ------------------------------------------------- underwriting (Phase 3/4)
+
+/// One row per assessment run. A risk may be re-assessed (new scoring input,
+/// new model version); `clearance` always reads the latest by `assessedAt`.
+model UnderwritingAssessment {
+  id                    String   @id @default(uuid())
+  riskId                String
+  organisationId        String
+  organisation          Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  eligible              Boolean
+  band                  String
+  control               String
+  requiresHumanApproval Boolean
+  riskScoreConfidence   Float
+  expectedLossMinor     BigInt
+  currency              String   @db.Char(3)
+  premiumLowMinor       BigInt
+  premiumHighMinor      BigInt
+  capitalRequirementMinor BigInt
+  suggestedCapacityMinor  BigInt
+  exclusions            String[]
+  conditions            String[]
+  requiredEvidence      String[]
+  modelVersion          String
+  assessedAt            DateTime @default(now())
+
+  approvals UnderwritingApproval[]
+
+  @@index([riskId, assessedAt])
+  @@index([organisationId])
+}
+
+model UnderwritingApproval {
+  id                     String                 @id @default(uuid())
+  riskId                 String
+  assessment             UnderwritingAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  assessmentId           String
+  assessmentModelVersion String
+  approverSubjectId      String
+  decision               String
+  reason                 String
+  decidedAt              DateTime               @default(now())
+
+  @@index([riskId, decidedAt])
+}
+
+// ---------------------------------------------------------- marketplace
+
+enum ListingStatus {
+  OPEN
+  MATCHED
+  WITHDRAWN
+  EXPIRED
+}
+
+/// A cleared, underwritten risk offered to capital providers (brief §8).
+/// Listing itself does not move capital — it only requires that
+/// underwriting clearance already exists, checked at creation and re-checked
+/// (not cached) so a later approval revocation cannot leave a stale listing
+/// standing.
+model MarketListing {
+  id             String        @id @default(uuid())
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  submissionId   String        @unique
+  submission     RiskSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  riskId         String
+  title          String
+  riskClass      String
+  jurisdiction   String        @db.Char(2)
+  capacityMinor  BigInt
+  currency       String        @db.Char(3)
+  durationDays   Int
+  status         ListingStatus @default(OPEN)
+  listedAt       DateTime      @default(now())
+  closedAt       DateTime?
+
+  interests CapitalInterest[]
+
+  @@index([organisationId, status])
+  @@index([riskClass, jurisdiction, status])
+}
+
+/// A capital provider's standing appetite (brief §8: preferred risk classes,
+/// max exposure, geography, minimum return, duration, tolerance,
+/// concentration limits). One row per organisation; updating replaces it.
+model CapitalAppetiteProfile {
+  id                    String   @id @default(uuid())
+  organisationId        String   @unique
+  organisation          Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  preferredRiskClasses  String[]
+  maxExposureMinor      BigInt
+  currency              String   @db.Char(3)
+  preferredJurisdictions String[]
+  minimumReturnBps      Int
+  maxDurationDays        Int
+  riskTolerance         String
+  concentrationLimitBps  Int
+  updatedAt             DateTime @updatedAt
+
+  @@index([organisationId])
+}
+
+/// A capital provider's expressed, non-binding interest in a listing —
+/// syndication (Phase 5) is what turns interest into a binding allocation.
+model CapitalInterest {
+  id             String        @id @default(uuid())
+  listingId      String
+  listing        MarketListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  indicativeAmountMinor BigInt
+  currency       String        @db.Char(3)
+  note           String?
+  expressedAt    DateTime      @default(now())
+  withdrawnAt    DateTime?
+
+  @@unique([listingId, organisationId])
+  @@index([listingId])
+  @@index([organisationId])
 }

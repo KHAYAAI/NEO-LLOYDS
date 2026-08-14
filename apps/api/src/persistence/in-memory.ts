@@ -1,17 +1,27 @@
 import type {
   AgentMandate,
   AuditRecord,
+  CapitalAppetite,
   MarketRole,
   Organisation,
   RiskEdge,
   RiskNode,
+  RiskSubmission,
+  SubmissionStatus,
+  UnderwritingApproval,
+  UnderwritingAssessment,
 } from '@neo-lloyds/domain';
 import type {
   AuditRepository,
   Clock,
   GraphRepository,
   IdentityRepository,
+  MarketplaceRepository,
   StoredCredential,
+  StoredInterest,
+  StoredListing,
+  SubmissionRepository,
+  UnderwritingRepository,
 } from './ports.js';
 
 /**
@@ -156,6 +166,130 @@ export class InMemoryGraphRepository implements GraphRepository {
       (e) => ids.has(e.fromId) && ids.has(e.toId),
     );
     return { nodes, edges };
+  }
+}
+
+export class InMemorySubmissionRepository implements SubmissionRepository {
+  private readonly submissions = new Map<string, RiskSubmission>();
+
+  async create(submission: RiskSubmission): Promise<RiskSubmission> {
+    this.submissions.set(submission.id, submission);
+    return submission;
+  }
+
+  async advance(
+    id: string,
+    to: SubmissionStatus,
+    updatedAt: Date,
+  ): Promise<RiskSubmission | undefined> {
+    const existing = this.submissions.get(id);
+    if (!existing) return undefined;
+    const updated: RiskSubmission = { ...existing, status: to, updatedAt: updatedAt.toISOString() };
+    this.submissions.set(id, updated);
+    return updated;
+  }
+
+  async find(id: string): Promise<RiskSubmission | undefined> {
+    return this.submissions.get(id);
+  }
+
+  async listByOrganisation(organisationId: string): Promise<RiskSubmission[]> {
+    return [...this.submissions.values()].filter((s) => s.organisationId === organisationId);
+  }
+}
+
+export class InMemoryUnderwritingRepository implements UnderwritingRepository {
+  private readonly assessments: (UnderwritingAssessment & { id: string; organisationId: string })[] = [];
+  private readonly approvals: (UnderwritingApproval & { id: string; assessmentId: string })[] = [];
+
+  async createAssessment(
+    assessment: UnderwritingAssessment & { id: string; organisationId: string },
+  ) {
+    this.assessments.push(assessment);
+    return assessment;
+  }
+
+  async latestAssessment(riskId: string) {
+    const matches = this.assessments.filter((a) => a.riskId === riskId);
+    return matches.at(-1);
+  }
+
+  async createApproval(approval: UnderwritingApproval & { id: string; assessmentId: string }) {
+    this.approvals.push(approval);
+    return approval;
+  }
+
+  async latestApproval(riskId: string): Promise<UnderwritingApproval | undefined> {
+    const matches = this.approvals.filter((a) => a.riskId === riskId);
+    return matches.at(-1);
+  }
+}
+
+export class InMemoryMarketplaceRepository implements MarketplaceRepository {
+  private readonly listings = new Map<string, StoredListing>();
+  private readonly appetites = new Map<string, CapitalAppetite>();
+  private readonly interests = new Map<string, StoredInterest[]>();
+
+  async createListing(
+    listing: Omit<StoredListing, 'status' | 'listedAt' | 'closedAt'>,
+  ): Promise<StoredListing> {
+    const stored: StoredListing = { ...listing, status: 'OPEN', listedAt: new Date(), closedAt: null };
+    this.listings.set(stored.id, stored);
+    return stored;
+  }
+
+  async findListing(id: string): Promise<StoredListing | undefined> {
+    return this.listings.get(id);
+  }
+
+  async findListingBySubmission(submissionId: string): Promise<StoredListing | undefined> {
+    return [...this.listings.values()].find((l) => l.submissionId === submissionId);
+  }
+
+  async listOpenListings(filter: { riskClass?: string; jurisdiction?: string }): Promise<StoredListing[]> {
+    return [...this.listings.values()].filter(
+      (l) =>
+        l.status === 'OPEN' &&
+        (!filter.riskClass || l.riskClass === filter.riskClass) &&
+        (!filter.jurisdiction || l.jurisdiction === filter.jurisdiction),
+    );
+  }
+
+  async setListingStatus(id: string, status: StoredListing['status'], closedAt?: Date): Promise<void> {
+    const listing = this.listings.get(id);
+    if (listing) {
+      listing.status = status;
+      if (closedAt) listing.closedAt = closedAt;
+    }
+  }
+
+  async upsertAppetite(profile: CapitalAppetite): Promise<CapitalAppetite> {
+    this.appetites.set(profile.organisationId, profile);
+    return profile;
+  }
+
+  async findAppetite(organisationId: string): Promise<CapitalAppetite | undefined> {
+    return this.appetites.get(organisationId);
+  }
+
+  async expressInterest(interest: Omit<StoredInterest, 'withdrawnAt'>): Promise<StoredInterest> {
+    const stored: StoredInterest = { ...interest, withdrawnAt: null };
+    const list = this.interests.get(interest.listingId) ?? [];
+    const withoutExisting = list.filter((i) => i.organisationId !== interest.organisationId);
+    this.interests.set(interest.listingId, [...withoutExisting, stored]);
+    return stored;
+  }
+
+  async listInterests(listingId: string): Promise<StoredInterest[]> {
+    return this.interests.get(listingId) ?? [];
+  }
+
+  async withdrawInterest(listingId: string, organisationId: string, at: Date): Promise<void> {
+    const list = this.interests.get(listingId) ?? [];
+    const updated = list.map((i) =>
+      i.organisationId === organisationId ? { ...i, withdrawnAt: at } : i,
+    );
+    this.interests.set(listingId, updated);
   }
 }
 

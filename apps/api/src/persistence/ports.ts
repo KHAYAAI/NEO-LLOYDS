@@ -1,10 +1,16 @@
 import type {
   AgentMandate,
   AuditRecord,
+  CapitalAppetite,
   MarketRole,
+  Money,
   Organisation,
   RiskEdge,
   RiskNode,
+  RiskSubmission,
+  SubmissionStatus,
+  UnderwritingApproval,
+  UnderwritingAssessment,
 } from '@neo-lloyds/domain';
 
 /**
@@ -69,9 +75,74 @@ export interface GraphRepository {
   loadSubgraph(organisationId: string): Promise<{ nodes: RiskNode[]; edges: RiskEdge[] }>;
 }
 
+export interface SubmissionRepository {
+  create(submission: RiskSubmission): Promise<RiskSubmission>;
+  advance(id: string, to: SubmissionStatus, updatedAt: Date): Promise<RiskSubmission | undefined>;
+  find(id: string): Promise<RiskSubmission | undefined>;
+  listByOrganisation(organisationId: string): Promise<RiskSubmission[]>;
+}
+
+export interface UnderwritingRepository {
+  createAssessment(
+    assessment: UnderwritingAssessment & { id: string; organisationId: string },
+  ): Promise<UnderwritingAssessment & { id: string }>;
+  /** Most recent assessment recorded for a risk, if any. */
+  latestAssessment(
+    riskId: string,
+  ): Promise<(UnderwritingAssessment & { id: string; organisationId: string }) | undefined>;
+  createApproval(
+    approval: UnderwritingApproval & { id: string; assessmentId: string },
+  ): Promise<UnderwritingApproval>;
+  /** Most recent approval recorded for a risk, if any. */
+  latestApproval(riskId: string): Promise<UnderwritingApproval | undefined>;
+}
+
+export interface StoredListing {
+  id: string;
+  organisationId: string;
+  submissionId: string;
+  riskId: string;
+  title: string;
+  riskClass: string;
+  jurisdiction: string;
+  capacity: Money;
+  status: 'OPEN' | 'MATCHED' | 'WITHDRAWN' | 'EXPIRED';
+  durationDays: number;
+  listedAt: Date;
+  closedAt: Date | null;
+}
+
+export interface StoredInterest {
+  id: string;
+  listingId: string;
+  organisationId: string;
+  indicativeAmount: Money;
+  note: string | null;
+  expressedAt: Date;
+  withdrawnAt: Date | null;
+}
+
+export interface MarketplaceRepository {
+  createListing(listing: Omit<StoredListing, 'status' | 'listedAt' | 'closedAt'>): Promise<StoredListing>;
+  findListing(id: string): Promise<StoredListing | undefined>;
+  findListingBySubmission(submissionId: string): Promise<StoredListing | undefined>;
+  listOpenListings(filter: { riskClass?: string; jurisdiction?: string }): Promise<StoredListing[]>;
+  setListingStatus(id: string, status: StoredListing['status'], closedAt?: Date): Promise<void>;
+
+  upsertAppetite(profile: CapitalAppetite): Promise<CapitalAppetite>;
+  findAppetite(organisationId: string): Promise<CapitalAppetite | undefined>;
+
+  expressInterest(interest: Omit<StoredInterest, 'withdrawnAt'>): Promise<StoredInterest>;
+  listInterests(listingId: string): Promise<StoredInterest[]>;
+  withdrawInterest(listingId: string, organisationId: string, at: Date): Promise<void>;
+}
+
 export const IDENTITY_REPOSITORY = Symbol('IDENTITY_REPOSITORY');
 export const AUDIT_REPOSITORY = Symbol('AUDIT_REPOSITORY');
 export const GRAPH_REPOSITORY = Symbol('GRAPH_REPOSITORY');
+export const SUBMISSION_REPOSITORY = Symbol('SUBMISSION_REPOSITORY');
+export const UNDERWRITING_REPOSITORY = Symbol('UNDERWRITING_REPOSITORY');
+export const MARKETPLACE_REPOSITORY = Symbol('MARKETPLACE_REPOSITORY');
 export const CLOCK = Symbol('CLOCK');
 
 export interface Clock {

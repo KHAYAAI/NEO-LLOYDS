@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import {
   assessUnderwriting,
   DomainError,
@@ -13,7 +14,14 @@ import {
   type UnderwritingApproval,
   type UnderwritingAssessment,
 } from '@neo-lloyds/domain';
-import { CLOCK, GRAPH_REPOSITORY, type Clock, type GraphRepository } from '../persistence/ports.js';
+import {
+  CLOCK,
+  GRAPH_REPOSITORY,
+  UNDERWRITING_REPOSITORY,
+  type Clock,
+  type GraphRepository,
+  type UnderwritingRepository,
+} from '../persistence/ports.js';
 import { AuditService } from '../common/audit.service.js';
 
 export interface AssessRiskRequest {
@@ -29,18 +37,16 @@ export interface AssessRiskRequest {
 /**
  * Underwriting service (brief §7). Composes the pure `scoreRisk` +
  * `assessUnderwriting` domain functions with persistence, tenant
- * authorisation and audit. Assessments and approvals are held in-memory in
- * Phase 3 for the same reason submissions were in Phase 2: this is where the
- * workflow and the approval-gate logic are new, and they get a durable table
- * once Phase 4 marketplace listing depends on reading them back.
+ * authorisation and audit. Durable from Phase 4: assessments and approvals
+ * are written through `UnderwritingRepository` so `requireClearance` reflects
+ * reality across a restart, which matters once a marketplace listing's
+ * validity depends on it.
  */
 @Injectable()
 export class UnderwritingService {
-  private readonly assessments = new Map<string, UnderwritingAssessment>();
-  private readonly approvals = new Map<string, UnderwritingApproval>();
-
   constructor(
     @Inject(GRAPH_REPOSITORY) private readonly graphRepo: GraphRepository,
+    @Inject(UNDERWRITING_REPOSITORY) private readonly underwritingRepo: UnderwritingRepository,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(AuditService) private readonly audit: AuditService,
   ) {}
@@ -68,7 +74,11 @@ export class UnderwritingService {
     );
 
     const assessment = assessUnderwriting(score, request.thresholds, this.clock.now());
-    this.assessments.set(riskId, assessment);
+    const stored = await this.underwritingRepo.createAssessment({
+      ...assessment,
+      id: randomUUID(),
+      organisationId: riskNode.organisationId,
+    });
 
     await this.audit.record({
       ctx,
@@ -81,21 +91,20 @@ export class UnderwritingService {
       policy: assessment.modelVersion,
     });
 
-    return assessment;
+    return stored;
   }
 
   async getAssessment(ctx: AuthContext, riskId: string): Promise<UnderwritingAssessment> {
-    const assessment = this.assessments.get(riskId);
+    const assessment = await this.underwritingRepo.latestAssessment(riskId);
     if (!assessment) throw new NotFoundException('No assessment recorded for this risk');
-    const riskNode = await this.graphRepo.findNode(riskId);
-    if (riskNode) requireTenantAccess(ctx, riskNode.organisationId, 'READ');
+    requireTenantAccess(ctx, assessment.organisationId, 'READ');
     return assessment;
   }
 
   /**
-   * Records a human decision. Only an UNDERWRITER (or above, via role checks
-   * upstream) may approve — this is the one write path that can satisfy
-   * `requireApprovalIfNeeded`, and it is itself gated by role, not just scope.
+   * Records a human decision. Only an UNDERWRITER may approve — this is the
+   * one write path that can satisfy `requireApprovalIfNeeded`, and it is
+   * itself gated by role, not just scope.
    */
   async approve(
     ctx: AuthContext,
@@ -105,18 +114,19 @@ export class UnderwritingService {
   ): Promise<UnderwritingApproval> {
     requireAnyRole(ctx, ['UNDERWRITER']);
 
-    const assessment = this.assessments.get(riskId);
+    const assessment = await this.underwritingRepo.latestAssessment(riskId);
     if (!assessment) throw new NotFoundException('No assessment recorded for this risk');
 
-    const approval: UnderwritingApproval = {
+    const approval = await this.underwritingRepo.createApproval({
+      id: randomUUID(),
+      assessmentId: assessment.id,
       riskId,
       assessmentModelVersion: assessment.modelVersion,
       approverSubjectId: ctx.subjectId,
       decision,
       reason,
       decidedAt: this.clock.now().toISOString(),
-    };
-    this.approvals.set(riskId, approval);
+    });
 
     await this.audit.record({
       ctx,
@@ -139,12 +149,14 @@ export class UnderwritingService {
    * listing, syndication) must call before treating a risk as underwritten.
    */
   async requireClearance(ctx: AuthContext, riskId: string): Promise<void> {
-    const assessment = this.assessments.get(riskId);
+    const assessment = await this.underwritingRepo.latestAssessment(riskId);
     if (!assessment) {
       throw new DomainError('No underwriting assessment exists for this risk', 'NOT_ASSESSED', {
         riskId,
       });
     }
-    requireApprovalIfNeeded(assessment, this.approvals.get(riskId));
+    requireTenantAccess(ctx, assessment.organisationId, 'READ');
+    const approval = await this.underwritingRepo.latestApproval(riskId);
+    requireApprovalIfNeeded(assessment, approval);
   }
 }

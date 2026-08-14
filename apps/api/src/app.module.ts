@@ -18,17 +18,25 @@ import { ANALYST_PROVIDER } from './analyst/tokens.js';
 import { createAnalystProvider, NullAnalystProvider } from './analyst/providers.js';
 import { UnderwritingController } from './underwriting/underwriting.controller.js';
 import { UnderwritingService } from './underwriting/underwriting.service.js';
+import { MarketplaceController } from './marketplace/marketplace.controller.js';
+import { MarketplaceService } from './marketplace/marketplace.service.js';
 import {
   AUDIT_REPOSITORY,
   CLOCK,
   GRAPH_REPOSITORY,
   IDENTITY_REPOSITORY,
+  MARKETPLACE_REPOSITORY,
+  SUBMISSION_REPOSITORY,
+  UNDERWRITING_REPOSITORY,
 } from './persistence/ports.js';
 import {
   PrismaAuditRepository,
   PrismaGraphRepository,
   PrismaIdentityRepository,
+  PrismaMarketplaceRepository,
   PrismaService,
+  PrismaSubmissionRepository,
+  PrismaUnderwritingRepository,
 } from './persistence/prisma.repositories.js';
 import { SystemClock } from './persistence/in-memory.js';
 
@@ -41,10 +49,22 @@ const CONTROLLERS = [
   SubmissionController,
   AnalystController,
   UnderwritingController,
+  MarketplaceController,
+];
+
+const SERVICES = [
+  IdentityService,
+  GraphService,
+  ScoringService,
+  SubmissionService,
+  AnalystService,
+  UnderwritingService,
+  MarketplaceService,
+  AuditService,
 ];
 
 /**
- * Phase 1+2 composition. Persistence is injected through ports, so the test
+ * Phase 1–4 composition. Persistence is injected through ports, so the test
  * suite supplies in-memory adapters and everything above them is identical.
  */
 @Module({})
@@ -53,6 +73,9 @@ export class AppModule {
     identity: unknown;
     audit: unknown;
     graph: unknown;
+    submission: unknown;
+    underwriting: unknown;
+    marketplace: unknown;
     clock: unknown;
     analystProvider?: unknown;
     extra?: unknown[];
@@ -61,16 +84,13 @@ export class AppModule {
       module: AppModule,
       controllers: CONTROLLERS,
       providers: [
-        IdentityService,
-        GraphService,
-        ScoringService,
-        SubmissionService,
-        AnalystService,
-        UnderwritingService,
-        AuditService,
+        ...SERVICES,
         { provide: IDENTITY_REPOSITORY, useValue: providers.identity },
         { provide: AUDIT_REPOSITORY, useValue: providers.audit },
         { provide: GRAPH_REPOSITORY, useValue: providers.graph },
+        { provide: SUBMISSION_REPOSITORY, useValue: providers.submission },
+        { provide: UNDERWRITING_REPOSITORY, useValue: providers.underwriting },
+        { provide: MARKETPLACE_REPOSITORY, useValue: providers.marketplace },
         { provide: CLOCK, useValue: providers.clock },
         {
           provide: ANALYST_PROVIDER,
@@ -89,16 +109,13 @@ export class AppModule {
       controllers: CONTROLLERS,
       providers: [
         PrismaService,
-        IdentityService,
-        GraphService,
-        ScoringService,
-        SubmissionService,
-        AnalystService,
-        UnderwritingService,
-        AuditService,
+        ...SERVICES,
         { provide: IDENTITY_REPOSITORY, useClass: PrismaIdentityRepository },
         { provide: AUDIT_REPOSITORY, useClass: PrismaAuditRepository },
         { provide: GRAPH_REPOSITORY, useClass: PrismaGraphRepository },
+        { provide: SUBMISSION_REPOSITORY, useClass: PrismaSubmissionRepository },
+        { provide: UNDERWRITING_REPOSITORY, useClass: PrismaUnderwritingRepository },
+        { provide: MARKETPLACE_REPOSITORY, useClass: PrismaMarketplaceRepository },
         { provide: CLOCK, useClass: SystemClock },
         { provide: ANALYST_PROVIDER, useFactory: createAnalystProvider },
         { provide: APP_GUARD, useClass: ApiCredentialGuard },

@@ -11,6 +11,9 @@ import {
   InMemoryAuditRepository,
   InMemoryGraphRepository,
   InMemoryIdentityRepository,
+  InMemoryMarketplaceRepository,
+  InMemorySubmissionRepository,
+  InMemoryUnderwritingRepository,
   SystemClock,
 } from '../src/persistence/in-memory.js';
 import { generateCredential, hashSecret } from '../src/common/auth.js';
@@ -18,6 +21,9 @@ import { generateCredential, hashSecret } from '../src/common/auth.js';
 const identity = new InMemoryIdentityRepository();
 const audit = new InMemoryAuditRepository();
 const graphRepo = new InMemoryGraphRepository();
+const submissionRepo = new InMemorySubmissionRepository();
+const underwritingRepo = new InMemoryUnderwritingRepository();
+const marketplaceRepo = new InMemoryMarketplaceRepository();
 
 let app: INestApplication;
 let http: string;
@@ -62,6 +68,9 @@ beforeAll(async () => {
         identity,
         audit,
         graph: graphRepo,
+        submission: submissionRepo,
+        underwriting: underwritingRepo,
+        marketplace: marketplaceRepo,
         clock: new SystemClock(),
       }),
     ],
@@ -653,5 +662,140 @@ describe('Phase 3: underwriting assessment and approval gate', () => {
     const response = await authed().get(`/underwriting/risks/${risk}/clearance`);
     expect(response.status).toBe(422);
     expect(response.body.error.code).toBe('NOT_ASSESSED');
+  });
+});
+
+describe('Phase 4: marketplace', () => {
+  async function readySubmission(riskLabel: string) {
+    const risk = await createNode('RISK', riskLabel);
+    const submission = await authed()
+      .post('/submissions')
+      .send({ riskId: risk, title: riskLabel })
+      .then((r) => r.body.submission);
+
+    await authed().post(`/underwriting/risks/${risk}/assess`).send({
+      factors: [
+        { key: 'f1', description: 'd', weight: 1, likelihood: 0.01, confidence: 0.95, basis: 'STATISTICAL_MODEL' },
+      ],
+      maximumEstimatedLossMinor: 10000,
+      currency: 'USD',
+      durationDays: 30,
+      mitigationCoverage: 0,
+      correlatedRiskCount: 0,
+      concentrationShare: 0,
+    });
+
+    for (const to of ['SUBMITTED', 'ANALYSING', 'SCORED', 'READY_FOR_UNDERWRITING']) {
+      await authed().post(`/submissions/${submission.id}/advance`).send({ to });
+    }
+
+    return { risk, submission };
+  }
+
+  it('lists a ready, cleared submission and rejects listing an unready one', async () => {
+    const { submission } = await readySubmission('marketplace-listing-risk');
+    const listed = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: submission.id, riskClass: 'MARINE_CARGO', capacityMinor: 5000, currency: 'USD', durationDays: 30 })
+      .expect(201);
+    expect(listed.body.listing.status).toBe('OPEN');
+
+    const dup = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: submission.id, riskClass: 'MARINE_CARGO', capacityMinor: 5000, currency: 'USD', durationDays: 30 });
+    expect(dup.status).toBe(422);
+    expect(dup.body.error.code).toBe('ALREADY_LISTED');
+  });
+
+  it('refuses to list a submission whose risk lacks underwriting clearance', async () => {
+    const risk = await createNode('RISK', 'unassessed-listing-risk');
+    const submission = await authed()
+      .post('/submissions')
+      .send({ riskId: risk, title: 'unassessed' })
+      .then((r) => r.body.submission);
+    for (const to of ['SUBMITTED', 'ANALYSING', 'SCORED', 'READY_FOR_UNDERWRITING']) {
+      await authed().post(`/submissions/${submission.id}/advance`).send({ to });
+    }
+
+    const response = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: submission.id, riskClass: 'MARINE_CARGO', capacityMinor: 5000, currency: 'USD', durationDays: 30 });
+    expect(response.status).toBe(422);
+    expect(response.body.error.code).toBe('NOT_ASSESSED');
+  });
+
+  it('a capital provider sets appetite, matches, expresses and withdraws interest', async () => {
+    const { submission } = await readySubmission('appetite-match-risk');
+    const listed = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: submission.id, riskClass: 'MARINE_CARGO', capacityMinor: 5000, currency: 'USD', durationDays: 30 })
+      .expect(201);
+    const listingId = listed.body.listing.id as string;
+
+    const provider = await bootstrapOrganisation('Test Capital Provider', ['*'], ['CAPITAL_PROVIDER']);
+    const providerAuth = () => ({
+      get: (url: string) => request(http).get(url).set('Authorization', `Bearer ${provider.token}`),
+      post: (url: string) => request(http).post(url).set('Authorization', `Bearer ${provider.token}`),
+      delete: (url: string) => request(http).delete(url).set('Authorization', `Bearer ${provider.token}`),
+    });
+
+    await providerAuth()
+      .post('/marketplace/appetite')
+      .send({
+        preferredRiskClasses: ['MARINE_CARGO'],
+        maxExposureMinor: 1_000_000,
+        currency: 'USD',
+        preferredJurisdictions: ['ZA'],
+        minimumReturnBps: 500,
+        maxDurationDays: 60,
+        riskTolerance: 'MODERATE',
+        concentrationLimitBps: 10_000,
+      })
+      .expect(201);
+
+    const matches = await providerAuth().get('/marketplace/appetite/matches').expect(200);
+    expect(matches.body.matches.some((m: { listing: { id: string }; result: { matches: boolean } }) => m.listing.id === listingId && m.result.matches)).toBe(true);
+
+    const interest = await providerAuth()
+      .post(`/marketplace/listings/${listingId}/interest`)
+      .send({ indicativeAmountMinor: 2000, currency: 'USD', note: 'Interested.' })
+      .expect(201);
+    expect(interest.body.interest.organisationId).toBe(provider.id);
+
+    const listed2 = await authed().get(`/marketplace/listings/${listingId}/interest`).expect(200);
+    expect(listed2.body.interests).toHaveLength(1);
+
+    await providerAuth().delete(`/marketplace/listings/${listingId}/interest`).expect(200);
+  });
+
+  it('a non-capital-provider cannot set appetite or express interest', async () => {
+    const broker = await bootstrapOrganisation('Marketplace Broker Only', ['*'], ['BROKER']);
+    const response = await request(http)
+      .post('/marketplace/appetite')
+      .set('Authorization', `Bearer ${broker.token}`)
+      .send({
+        preferredRiskClasses: [],
+        maxExposureMinor: 1000,
+        currency: 'USD',
+        preferredJurisdictions: [],
+        minimumReturnBps: 100,
+        maxDurationDays: 30,
+        riskTolerance: 'CONSERVATIVE',
+        concentrationLimitBps: 5000,
+      });
+    expect(response.status).toBe(403);
+  });
+
+  it('browsing listings never exposes a withdrawn listing', async () => {
+    const { submission } = await readySubmission('withdrawn-listing-risk');
+    const listed = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: submission.id, riskClass: 'UNIQUE_CLASS_XYZ', capacityMinor: 5000, currency: 'USD', durationDays: 30 })
+      .expect(201);
+
+    await authed().post(`/marketplace/listings/${listed.body.listing.id}/withdraw`).expect(201);
+
+    const browsed = await authed().get('/marketplace/listings?riskClass=UNIQUE_CLASS_XYZ').expect(200);
+    expect(browsed.body.listings).toHaveLength(0);
   });
 });
