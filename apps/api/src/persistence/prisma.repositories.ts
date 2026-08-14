@@ -23,10 +23,13 @@ import type {
   AllocationEvent,
   AuditRepository,
   CapitalRepository,
+  ClaimsRepository,
   GraphRepository,
   IdentityRepository,
   MarketplaceRepository,
   StoredCapitalCommitment,
+  StoredClaim,
+  StoredClaimPayout,
   StoredCredential,
   StoredInterest,
   StoredListing,
@@ -993,5 +996,175 @@ export class PrismaCapitalRepository implements CapitalRepository {
     const row = await this.prisma.capitalCommitment.findUnique({ where: { organisationId } });
     if (!row) return undefined;
     return { organisationId, committed: money(Number(row.committedMinor), row.currency), updatedAt: row.updatedAt };
+  }
+}
+
+@Injectable()
+export class PrismaClaimsRepository implements ClaimsRepository {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private toDomain(row: {
+    id: string;
+    syndicationId: string;
+    riskId: string;
+    organisationId: string;
+    status: string;
+    incidentDescription: string;
+    evidenceRefs: string[];
+    reportedBy: string;
+    claimedLossMinor: bigint | null;
+    currency: string | null;
+    reviewDecision: string | null;
+    approverSubjectId: string | null;
+    approvalDecision: string | null;
+    approvalReason: string | null;
+    decidedAt: Date | null;
+    settledAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }): StoredClaim {
+    return {
+      id: row.id,
+      syndicationId: row.syndicationId,
+      riskId: row.riskId,
+      organisationId: row.organisationId,
+      status: row.status as StoredClaim['status'],
+      incidentDescription: row.incidentDescription,
+      evidenceRefs: row.evidenceRefs,
+      reportedBy: row.reportedBy,
+      claimedLoss:
+        row.claimedLossMinor !== null && row.currency
+          ? money(Number(row.claimedLossMinor), row.currency)
+          : null,
+      reviewDecision: row.reviewDecision as StoredClaim['reviewDecision'],
+      approverSubjectId: row.approverSubjectId,
+      approvalDecision: row.approvalDecision as StoredClaim['approvalDecision'],
+      approvalReason: row.approvalReason,
+      decidedAt: row.decidedAt,
+      settledAt: row.settledAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  async create(input: {
+    id: string;
+    syndicationId: string;
+    riskId: string;
+    organisationId: string;
+    incidentDescription: string;
+    reportedBy: string;
+  }): Promise<StoredClaim> {
+    const row = await this.prisma.claim.create({
+      data: {
+        id: input.id,
+        syndicationId: input.syndicationId,
+        riskId: input.riskId,
+        organisationId: input.organisationId,
+        incidentDescription: input.incidentDescription,
+        reportedBy: input.reportedBy,
+      },
+    });
+    return this.toDomain(row);
+  }
+
+  async find(id: string): Promise<StoredClaim | undefined> {
+    const row = await this.prisma.claim.findUnique({ where: { id } });
+    return row ? this.toDomain(row) : undefined;
+  }
+
+  async listBySyndication(syndicationId: string): Promise<StoredClaim[]> {
+    const rows = await this.prisma.claim.findMany({ where: { syndicationId } });
+    return rows.map((row) => this.toDomain(row));
+  }
+
+  async addEvidence(id: string, evidenceRef: string): Promise<StoredClaim> {
+    const row = await this.prisma.claim.update({
+      where: { id },
+      data: { evidenceRefs: { push: evidenceRef } },
+    });
+    return this.toDomain(row);
+  }
+
+  async setStatus(id: string, status: StoredClaim['status']): Promise<StoredClaim> {
+    const row = await this.prisma.claim.update({ where: { id }, data: { status: status as never } });
+    return this.toDomain(row);
+  }
+
+  async setLoss(
+    id: string,
+    claimedLoss: Money,
+    reviewDecision: 'AUTO' | 'HUMAN_REVIEW',
+    status: StoredClaim['status'],
+  ): Promise<StoredClaim> {
+    const row = await this.prisma.claim.update({
+      where: { id },
+      data: {
+        claimedLossMinor: BigInt(claimedLoss.amountMinor),
+        currency: claimedLoss.currency,
+        reviewDecision,
+        status: status as never,
+      },
+    });
+    return this.toDomain(row);
+  }
+
+  async setApproval(
+    id: string,
+    approverSubjectId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    reason: string,
+    decidedAt: Date,
+    status: StoredClaim['status'],
+  ): Promise<StoredClaim> {
+    const row = await this.prisma.claim.update({
+      where: { id },
+      data: {
+        approverSubjectId,
+        approvalDecision: decision,
+        approvalReason: reason,
+        decidedAt,
+        status: status as never,
+      },
+    });
+    return this.toDomain(row);
+  }
+
+  async setSettled(id: string, settledAt: Date): Promise<StoredClaim> {
+    const row = await this.prisma.claim.update({
+      where: { id },
+      data: { status: 'SETTLED', settledAt },
+    });
+    return this.toDomain(row);
+  }
+
+  async totalApprovedLoss(syndicationId: string, currency: string): Promise<Money> {
+    const rows = await this.prisma.claim.findMany({
+      where: { syndicationId, status: { in: ['APPROVED', 'SETTLED'] } },
+      select: { claimedLossMinor: true },
+    });
+    const total = rows.reduce((acc, row) => acc + Number(row.claimedLossMinor ?? 0n), 0);
+    return money(total, currency);
+  }
+
+  async recordPayouts(claimId: string, payouts: readonly StoredClaimPayout[]): Promise<void> {
+    await this.prisma.claimPayout.createMany({
+      data: payouts.map((payout) => ({
+        id: randomUUID(),
+        claimId,
+        organisationId: payout.organisationId,
+        amountMinor: BigInt(payout.amount.amountMinor),
+        currency: payout.amount.currency,
+      })),
+    });
+  }
+
+  async listPayouts(claimId: string): Promise<StoredClaimPayout[]> {
+    const rows = await this.prisma.claimPayout.findMany({ where: { claimId } });
+    return rows.map((row) => ({
+      claimId: row.claimId,
+      organisationId: row.organisationId,
+      amount: money(Number(row.amountMinor), row.currency),
+    }));
   }
 }

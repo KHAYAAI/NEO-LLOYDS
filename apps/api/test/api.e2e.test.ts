@@ -14,6 +14,7 @@ import {
   InMemoryMarketplaceRepository,
   InMemorySubmissionRepository,
   InMemoryCapitalRepository,
+  InMemoryClaimsRepository,
   InMemorySyndicationRepository,
   InMemoryUnderwritingRepository,
   SystemClock,
@@ -28,6 +29,7 @@ const underwritingRepo = new InMemoryUnderwritingRepository();
 const marketplaceRepo = new InMemoryMarketplaceRepository();
 const syndicationRepo = new InMemorySyndicationRepository();
 const capitalRepo = new InMemoryCapitalRepository();
+const claimsRepo = new InMemoryClaimsRepository();
 
 let app: INestApplication;
 let http: string;
@@ -77,6 +79,7 @@ beforeAll(async () => {
         marketplace: marketplaceRepo,
         syndication: syndicationRepo,
         capital: capitalRepo,
+        claims: claimsRepo,
         clock: new SystemClock(),
       }),
     ],
@@ -95,6 +98,7 @@ beforeAll(async () => {
     'RISK_ORIGINATOR',
     'BROKER',
     'UNDERWRITER',
+    'CLAIMS_ADMINISTRATOR',
   ]);
   rootOrgId = root.id;
   rootToken = root.token;
@@ -1208,5 +1212,221 @@ describe('Phase 6: capital ledger — cross-syndication exposure', () => {
     );
     expect(total).toBe(10_000);
     expect(concentration.body.buckets.every((b: { shareBps: number }) => b.shareBps === 10_000)).toBe(true);
+  });
+});
+
+describe('Phase 7: claims — testing a bound allocation against a loss', () => {
+  function providerAuth(token: string) {
+    return {
+      get: (url: string) => request(http).get(url).set('Authorization', `Bearer ${token}`),
+      post: (url: string) => request(http).post(url).set('Authorization', `Bearer ${token}`),
+    };
+  }
+
+  /** Opens, syndicates, and fully binds a listing with a single 100% provider. */
+  async function boundSyndication(riskLabel: string, capacityMinor = 100_000) {
+    const risk = await createNode('RISK', riskLabel);
+    const submission = await authed()
+      .post('/submissions')
+      .send({ riskId: risk, title: riskLabel })
+      .then((r) => r.body.submission);
+
+    await authed().post(`/underwriting/risks/${risk}/assess`).send({
+      factors: [
+        { key: 'f1', description: 'd', weight: 1, likelihood: 0.01, confidence: 0.95, basis: 'STATISTICAL_MODEL' },
+      ],
+      maximumEstimatedLossMinor: 10000,
+      currency: 'USD',
+      durationDays: 30,
+      mitigationCoverage: 0,
+      correlatedRiskCount: 0,
+      concentrationShare: 0,
+    });
+    for (const to of ['SUBMITTED', 'ANALYSING', 'SCORED', 'READY_FOR_UNDERWRITING']) {
+      await authed().post(`/submissions/${submission.id}/advance`).send({ to });
+    }
+
+    const listing = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: submission.id, riskClass: 'CLAIMS_TEST', capacityMinor, currency: 'USD', durationDays: 30 })
+      .then((r) => r.body.listing);
+
+    const syndication = await authed()
+      .post('/syndication')
+      .send({ listingId: listing.id })
+      .then((r) => r.body.syndication);
+
+    const provider = await bootstrapOrganisation(`Claims Provider ${riskLabel}`, ['*'], ['CAPITAL_PROVIDER']);
+    await providerAuth(provider.token)
+      .post(`/marketplace/listings/${listing.id}/interest`)
+      .send({ indicativeAmountMinor: capacityMinor, currency: 'USD' })
+      .expect(201);
+    await providerAuth(provider.token)
+      .post('/capital/commitments')
+      .send({ committedMinor: capacityMinor, currency: 'USD' })
+      .expect(201);
+    await providerAuth(provider.token)
+      .post(`/syndication/${syndication.id}/allocations`)
+      .send({ shareBps: 10_000 })
+      .expect(201);
+    await authed().post(`/syndication/${syndication.id}/bind`).expect(201);
+
+    return { riskId: risk, syndicationId: syndication.id as string, provider };
+  }
+
+  it('refuses to confirm coverage against a syndication that is not BOUND', async () => {
+    const risk = await createNode('RISK', 'claims-unbound-risk');
+    const submission = await authed()
+      .post('/submissions')
+      .send({ riskId: risk, title: 'unbound' })
+      .then((r) => r.body.submission);
+    await authed().post(`/underwriting/risks/${risk}/assess`).send({
+      factors: [{ key: 'f1', description: 'd', weight: 1, likelihood: 0.01, confidence: 0.95, basis: 'STATISTICAL_MODEL' }],
+      maximumEstimatedLossMinor: 10000, currency: 'USD', durationDays: 30,
+      mitigationCoverage: 0, correlatedRiskCount: 0, concentrationShare: 0,
+    });
+    for (const to of ['SUBMITTED', 'ANALYSING', 'SCORED', 'READY_FOR_UNDERWRITING']) {
+      await authed().post(`/submissions/${submission.id}/advance`).send({ to });
+    }
+    const listing = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: submission.id, riskClass: 'UNBOUND_TEST', capacityMinor: 10_000, currency: 'USD', durationDays: 30 })
+      .then((r) => r.body.listing);
+    const syndication = await authed().post('/syndication').send({ listingId: listing.id }).then((r) => r.body.syndication);
+
+    const claim = await authed()
+      .post('/claims')
+      .send({ syndicationId: syndication.id, riskId: risk, incidentDescription: 'test incident' })
+      .then((r) => r.body.claim);
+    await authed().post(`/claims/${claim.id}/advance`).send({ to: 'EVIDENCE_COLLECTED' }).expect(201);
+    await authed().post(`/claims/${claim.id}/advance`).send({ to: 'VERIFIED' }).expect(201);
+
+    const response = await authed().post(`/claims/${claim.id}/advance`).send({ to: 'COVERAGE_CONFIRMED' });
+    expect(response.status).toBe(422);
+    expect(response.body.error.code).toBe('SYNDICATION_NOT_BOUND');
+  });
+
+  it('a low-value claim is auto-approved and paid out exactly, with no human approval call', async () => {
+    const { riskId, syndicationId, provider } = await boundSyndication('claims-auto', 100_000);
+
+    const claim = await authed()
+      .post('/claims')
+      .send({ syndicationId, riskId, incidentDescription: 'Minor cargo damage.' })
+      .then((r) => r.body.claim);
+
+    await authed().post(`/claims/${claim.id}/evidence`).send({ evidenceRef: 'photo-1.jpg' }).expect(201);
+    await authed().post(`/claims/${claim.id}/advance`).send({ to: 'EVIDENCE_COLLECTED' }).expect(201);
+    await authed().post(`/claims/${claim.id}/advance`).send({ to: 'VERIFIED' }).expect(201);
+    await authed().post(`/claims/${claim.id}/advance`).send({ to: 'COVERAGE_CONFIRMED' }).expect(201);
+
+    const lossResult = await authed()
+      .post(`/claims/${claim.id}/loss`)
+      .send({ claimedLossMinor: 1000, currency: 'USD' })
+      .expect(201);
+    expect(lossResult.body.claim.reviewDecision).toBe('AUTO');
+    expect(lossResult.body.claim.status).toBe('APPROVED');
+
+    const payouts = await authed().get(`/claims/${claim.id}/payouts`).expect(200);
+    expect(payouts.body.payouts).toEqual([
+      { claimId: claim.id, organisationId: provider.id, amount: { amountMinor: 1000, currency: 'USD' } },
+    ]);
+
+    await authed().post(`/claims/${claim.id}/settle`).expect(201);
+    const settled = await authed().get(`/claims/${claim.id}`).expect(200);
+    expect(settled.body.claim.status).toBe('SETTLED');
+  });
+
+  it('a high-value claim requires human review and blocks approval without it', async () => {
+    const { riskId, syndicationId } = await boundSyndication('claims-human-review', 100_000_00);
+
+    const claim = await authed()
+      .post('/claims')
+      .send({ syndicationId, riskId, incidentDescription: 'Major loss.' })
+      .then((r) => r.body.claim);
+    await authed().post(`/claims/${claim.id}/advance`).send({ to: 'EVIDENCE_COLLECTED' }).expect(201);
+    await authed().post(`/claims/${claim.id}/advance`).send({ to: 'VERIFIED' }).expect(201);
+    await authed().post(`/claims/${claim.id}/advance`).send({ to: 'COVERAGE_CONFIRMED' }).expect(201);
+
+    const lossResult = await authed()
+      .post(`/claims/${claim.id}/loss`)
+      .send({ claimedLossMinor: 30_000_00, currency: 'USD' }) // above the $25,000 default threshold
+      .expect(201);
+    expect(lossResult.body.claim.reviewDecision).toBe('HUMAN_REVIEW');
+    expect(lossResult.body.claim.status).toBe('AWAITING_APPROVAL');
+
+    // No payout exists yet — nothing was approved.
+    const beforeApproval = await authed().get(`/claims/${claim.id}/payouts`).expect(200);
+    expect(beforeApproval.body.payouts).toHaveLength(0);
+
+    // Settling before approval is impossible: SETTLED is not reachable from AWAITING_APPROVAL.
+    const prematureSettle = await authed().post(`/claims/${claim.id}/settle`);
+    expect(prematureSettle.status).toBe(422);
+    expect(prematureSettle.body.error.code).toBe('INVALID_CLAIM_TRANSITION');
+
+    await authed().post(`/claims/${claim.id}/decide`).send({ decision: 'APPROVED', reason: 'Evidence sufficient.' }).expect(201);
+
+    const payouts = await authed().get(`/claims/${claim.id}/payouts`).expect(200);
+    expect(payouts.body.payouts[0].amount.amountMinor).toBe(30_000_00);
+  });
+
+  it('a rejected claim never produces a payout and cannot be settled', async () => {
+    const { riskId, syndicationId } = await boundSyndication('claims-rejected', 100_000_00);
+
+    const claim = await authed()
+      .post('/claims')
+      .send({ syndicationId, riskId, incidentDescription: 'Disputed loss.' })
+      .then((r) => r.body.claim);
+    await authed().post(`/claims/${claim.id}/advance`).send({ to: 'EVIDENCE_COLLECTED' }).expect(201);
+    await authed().post(`/claims/${claim.id}/advance`).send({ to: 'VERIFIED' }).expect(201);
+    await authed().post(`/claims/${claim.id}/advance`).send({ to: 'COVERAGE_CONFIRMED' }).expect(201);
+    await authed().post(`/claims/${claim.id}/loss`).send({ claimedLossMinor: 30_000_00, currency: 'USD' }).expect(201);
+
+    await authed().post(`/claims/${claim.id}/decide`).send({ decision: 'REJECTED', reason: 'Not covered.' }).expect(201);
+
+    const payouts = await authed().get(`/claims/${claim.id}/payouts`).expect(200);
+    expect(payouts.body.payouts).toHaveLength(0);
+
+    const settle = await authed().post(`/claims/${claim.id}/settle`);
+    expect(settle.status).toBe(422);
+  });
+
+  it('enforces the running total: a second claim cannot exceed what remains after the first', async () => {
+    const { riskId, syndicationId } = await boundSyndication('claims-running-total', 100_000_00);
+
+    // First claim: $60,000 of $100,000 capacity, auto-approved is impossible
+    // (above default threshold) so route through human approval.
+    const first = await authed()
+      .post('/claims')
+      .send({ syndicationId, riskId, incidentDescription: 'First incident.' })
+      .then((r) => r.body.claim);
+    await authed().post(`/claims/${first.id}/advance`).send({ to: 'EVIDENCE_COLLECTED' }).expect(201);
+    await authed().post(`/claims/${first.id}/advance`).send({ to: 'VERIFIED' }).expect(201);
+    await authed().post(`/claims/${first.id}/advance`).send({ to: 'COVERAGE_CONFIRMED' }).expect(201);
+    await authed().post(`/claims/${first.id}/loss`).send({ claimedLossMinor: 60_000_00, currency: 'USD' }).expect(201);
+    await authed().post(`/claims/${first.id}/decide`).send({ decision: 'APPROVED', reason: 'Confirmed.' }).expect(201);
+
+    // Second claim on the SAME syndication: only $40,000 remains ($100,000 -
+    // $60,000). $45,000 is well within the syndication's total capacity in
+    // isolation but exceeds what remains after the first claim.
+    const second = await authed()
+      .post('/claims')
+      .send({ syndicationId, riskId, incidentDescription: 'Second incident.' })
+      .then((r) => r.body.claim);
+    await authed().post(`/claims/${second.id}/advance`).send({ to: 'EVIDENCE_COLLECTED' }).expect(201);
+    await authed().post(`/claims/${second.id}/advance`).send({ to: 'VERIFIED' }).expect(201);
+    await authed().post(`/claims/${second.id}/advance`).send({ to: 'COVERAGE_CONFIRMED' }).expect(201);
+
+    const overRemaining = await authed()
+      .post(`/claims/${second.id}/loss`)
+      .send({ claimedLossMinor: 45_000_00, currency: 'USD' });
+    expect(overRemaining.status).toBe(422);
+    expect(overRemaining.body.error.code).toBe('LOSS_EXCEEDS_REMAINING_CAPACITY');
+    expect(overRemaining.body.error.details.remaining).toEqual({ amountMinor: 40_000_00, currency: 'USD' });
+
+    // Exactly the remaining $40,000 is accepted.
+    const withinRemaining = await authed()
+      .post(`/claims/${second.id}/loss`)
+      .send({ claimedLossMinor: 40_000_00, currency: 'USD' });
+    expect(withinRemaining.status).toBe(201);
   });
 });

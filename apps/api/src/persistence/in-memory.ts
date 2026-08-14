@@ -18,11 +18,14 @@ import type {
   AllocationEvent,
   AuditRepository,
   CapitalRepository,
+  ClaimsRepository,
   Clock,
   GraphRepository,
   IdentityRepository,
   MarketplaceRepository,
   StoredCapitalCommitment,
+  StoredClaim,
+  StoredClaimPayout,
   StoredCredential,
   StoredInterest,
   StoredListing,
@@ -470,6 +473,135 @@ export class InMemoryCapitalRepository implements CapitalRepository {
 
   async findCommitment(organisationId: string): Promise<StoredCapitalCommitment | undefined> {
     return this.commitments.get(organisationId);
+  }
+}
+
+export class InMemoryClaimsRepository implements ClaimsRepository {
+  private readonly claims = new Map<string, StoredClaim>();
+  private readonly payouts = new Map<string, StoredClaimPayout[]>();
+
+  async create(input: {
+    id: string;
+    syndicationId: string;
+    riskId: string;
+    organisationId: string;
+    incidentDescription: string;
+    reportedBy: string;
+  }): Promise<StoredClaim> {
+    const now = new Date();
+    const claim: StoredClaim = {
+      id: input.id,
+      syndicationId: input.syndicationId,
+      riskId: input.riskId,
+      organisationId: input.organisationId,
+      status: 'REPORTED',
+      incidentDescription: input.incidentDescription,
+      evidenceRefs: [],
+      reportedBy: input.reportedBy,
+      claimedLoss: null,
+      reviewDecision: null,
+      approverSubjectId: null,
+      approvalDecision: null,
+      approvalReason: null,
+      decidedAt: null,
+      settledAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.claims.set(claim.id, claim);
+    return claim;
+  }
+
+  async find(id: string): Promise<StoredClaim | undefined> {
+    return this.claims.get(id);
+  }
+
+  async listBySyndication(syndicationId: string): Promise<StoredClaim[]> {
+    return [...this.claims.values()].filter((c) => c.syndicationId === syndicationId);
+  }
+
+  private mustFind(id: string): StoredClaim {
+    const claim = this.claims.get(id);
+    if (!claim) throw new Error(`Unknown claim: ${id}`);
+    return claim;
+  }
+
+  async addEvidence(id: string, evidenceRef: string): Promise<StoredClaim> {
+    const claim = this.mustFind(id);
+    const updated: StoredClaim = {
+      ...claim,
+      evidenceRefs: [...claim.evidenceRefs, evidenceRef],
+      updatedAt: new Date(),
+    };
+    this.claims.set(id, updated);
+    return updated;
+  }
+
+  async setStatus(id: string, status: StoredClaim['status']): Promise<StoredClaim> {
+    const claim = this.mustFind(id);
+    const updated: StoredClaim = { ...claim, status, updatedAt: new Date() };
+    this.claims.set(id, updated);
+    return updated;
+  }
+
+  async setLoss(
+    id: string,
+    claimedLoss: Money,
+    reviewDecision: 'AUTO' | 'HUMAN_REVIEW',
+    status: StoredClaim['status'],
+  ): Promise<StoredClaim> {
+    const claim = this.mustFind(id);
+    const updated: StoredClaim = { ...claim, claimedLoss, reviewDecision, status, updatedAt: new Date() };
+    this.claims.set(id, updated);
+    return updated;
+  }
+
+  async setApproval(
+    id: string,
+    approverSubjectId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    reason: string,
+    decidedAt: Date,
+    status: StoredClaim['status'],
+  ): Promise<StoredClaim> {
+    const claim = this.mustFind(id);
+    const updated: StoredClaim = {
+      ...claim,
+      approverSubjectId,
+      approvalDecision: decision,
+      approvalReason: reason,
+      decidedAt,
+      status,
+      updatedAt: new Date(),
+    };
+    this.claims.set(id, updated);
+    return updated;
+  }
+
+  async setSettled(id: string, settledAt: Date): Promise<StoredClaim> {
+    const claim = this.mustFind(id);
+    const updated: StoredClaim = { ...claim, status: 'SETTLED', settledAt, updatedAt: new Date() };
+    this.claims.set(id, updated);
+    return updated;
+  }
+
+  async totalApprovedLoss(syndicationId: string, currency: string): Promise<Money> {
+    const relevant = [...this.claims.values()].filter(
+      (c) =>
+        c.syndicationId === syndicationId &&
+        (c.status === 'APPROVED' || c.status === 'SETTLED') &&
+        c.claimedLoss,
+    );
+    const total = relevant.reduce((acc, c) => acc + (c.claimedLoss?.amountMinor ?? 0), 0);
+    return { amountMinor: total, currency };
+  }
+
+  async recordPayouts(claimId: string, payouts: readonly StoredClaimPayout[]): Promise<void> {
+    this.payouts.set(claimId, [...payouts]);
+  }
+
+  async listPayouts(claimId: string): Promise<StoredClaimPayout[]> {
+    return this.payouts.get(claimId) ?? [];
   }
 }
 

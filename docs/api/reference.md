@@ -148,6 +148,22 @@ listing's exposure limit is still rejected with
 exposure, summed across every syndication it participates in, past its
 declared committed capital.
 
+## Claims (Phase 7)
+
+> The moment a bound allocation is tested against a real loss.
+
+| Method | Path | Scope / roles | Notes |
+|---|---|---|---|
+| POST | `/claims` | `claims:report` + originator/broker | Reports an incident against a BOUND syndication. Starts `REPORTED`. |
+| POST | `/claims/:id/evidence` | `claims:write` + originator/broker/`CLAIMS_ADMINISTRATOR` | Attaches an evidence reference (a bare string today — see the Phase 7 report on real evidence storage) |
+| POST | `/claims/:id/advance` | `claims:process` + `CLAIMS_ADMINISTRATOR` | `REPORTED → EVIDENCE_COLLECTED → VERIFIED → COVERAGE_CONFIRMED`. The `COVERAGE_CONFIRMED` step requires the syndication to be BOUND (`422 SYNDICATION_NOT_BOUND` otherwise). |
+| POST | `/claims/:id/loss` | `claims:process` + `CLAIMS_ADMINISTRATOR` | **THE COVERAGE TEST.** Checks the claimed loss against the syndication's bound capacity net of every prior approved/settled claim on it (`422 LOSS_EXCEEDS_REMAINING_CAPACITY` otherwise), then classifies `AUTO` (auto-approved and paid out immediately) or `HUMAN_REVIEW` (moves to `AWAITING_APPROVAL`) against a configurable threshold. |
+| POST | `/claims/:id/decide` | `claims:approve` + `CLAIMS_ADMINISTRATOR` | Records a human decision on a claim `AWAITING_APPROVAL`. `APPROVED` computes and records payouts; `REJECTED` is a legitimate terminal outcome, not an error. |
+| POST | `/claims/:id/settle` | `claims:settle` + `CLAIMS_ADMINISTRATOR`/`SETTLEMENT_PROVIDER` | Marks an `APPROVED` claim `SETTLED`. **No money moves** — real settlement is Phase 10. |
+| GET | `/claims/:id` | `claims:read` | |
+| GET | `/claims/:id/payouts` | `claims:read` | Each capital provider's exact share of an approved claim, summing exactly to the claimed loss |
+| GET | `/claims/by-syndication/:syndicationId` | `claims:read` | |
+
 ## Errors
 
 Domain invariant violations return `422` with a machine-readable code:
@@ -172,6 +188,9 @@ Codes: `INVALID_EDGE`, `DEPENDENCY_CYCLE`, `UNKNOWN_NODE`, `INVALID_PROVENANCE`,
 `SYNDICATION_NOT_OPEN`, `NO_LIVE_INTEREST`, `INVALID_SHARE`,
 `DUPLICATE_ALLOCATION`, `OVER_ALLOCATION`, `EXPOSURE_LIMIT_EXCEEDED`,
 `ALLOCATION_NOT_FOUND`, `INCOMPLETE_ALLOCATION`, `NO_CAPITAL_COMMITMENT`,
-`INSUFFICIENT_COMMITTED_CAPITAL`, `FORBIDDEN`
+`INSUFFICIENT_COMMITTED_CAPITAL`, `INVALID_CLAIM_TRANSITION`,
+`SYNDICATION_NOT_BOUND`, `LOSS_EXCEEDS_REMAINING_CAPACITY`,
+`CLAIM_APPROVAL_REQUIRED`, `CLAIM_NOT_APPROVED`, `NO_BOUND_ALLOCATIONS`,
+`CLAIM_NOT_AWAITING_APPROVAL`, `FORBIDDEN`
 (403). Malformed or unknown request fields return `400`; unauthenticated `401`;
 missing scope or role `403`.

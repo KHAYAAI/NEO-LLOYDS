@@ -96,10 +96,23 @@ documentation, local deployment, passing tests.
   each individually within a provider's per-listing appetite, together
   exceeding its total committed capital — caught only by this phase's check.
 
-## Phase 7 — Claims
-Incident → evidence → verification → policy match → coverage check → loss
-calculation → review → approval → settlement → audit. Parametric triggers kept
-in a separate engine from indemnity adjudication.
+## Phase 7 — Claims — **DELIVERED**
+
+- `requireCoverage`: the coverage test. A claim may only be filed against a
+  BOUND syndication, and the claimed loss — plus every prior APPROVED or
+  SETTLED claim already recorded against the same syndication, not just this
+  one — must never exceed the capacity that was bound.
+- `classifyReview` + `requireClaimApprovalIfNeeded`: AUTO below a
+  configurable threshold, mandatory HUMAN_REVIEW above it, mirroring the
+  underwriting approval gate from Phase 3.
+- `computeClaimPayouts`: divides an approved loss across bound allocations
+  using the same exact-sum split that binding itself uses (ADR-0005).
+- Parametric triggers remain out of scope, deliberately: they are
+  event-verified payments against a data feed, not a loss calculated from
+  evidence, and the brief requires them to stay a separate engine.
+- See `docs/reports/phase-7.md` for a live two-claim scenario proving the
+  running-total check, and for a real bug the e2e suite caught (a rejection
+  decision was tripping the check meant to guard approvals) before it shipped.
 
 ## Phase 8 — Simulation & Digital Twin
 Port closure, supply-chain disruption, commodity shock, weather, infrastructure

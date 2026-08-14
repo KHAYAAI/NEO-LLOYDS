@@ -71,6 +71,8 @@ model Organisation {
   syndications           Syndication[]
   syndicationAllocations SyndicationAllocation[]
   capitalCommitment      CapitalCommitment?
+  claims                 Claim[]
+  claimPayouts           ClaimPayout[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -450,6 +452,7 @@ model Syndication {
 
   allocations SyndicationAllocation[]
   events      SyndicationAllocationEvent[]
+  claims      Claim[]
 
   @@index([organisationId, status])
 }
@@ -508,4 +511,71 @@ model CapitalCommitment {
   currency       String       @db.Char(3)
   updatedAt      DateTime     @updatedAt
   createdAt      DateTime     @default(now())
+}
+
+// -------------------------------------------------------------- claims
+
+enum ClaimStatus {
+  REPORTED
+  EVIDENCE_COLLECTED
+  VERIFIED
+  COVERAGE_CONFIRMED
+  LOSS_CALCULATED
+  AWAITING_APPROVAL
+  APPROVED
+  REJECTED
+  SETTLED
+}
+
+/// Brief §13: Incident -> Evidence -> Verification -> Coverage Check -> Loss
+/// Calculation -> Human Review if required -> Approval -> Settlement ->
+/// Audit. Filed against a BOUND Syndication — see
+/// packages/domain/src/claims.ts: requireCoverage refuses anything else, and
+/// enforces a running total across every prior claim on the same
+/// syndication, not just this one.
+model Claim {
+  id                String      @id @default(uuid())
+  syndicationId     String
+  syndication       Syndication @relation(fields: [syndicationId], references: [id])
+  riskId            String
+  organisationId    String
+  organisation      Organisation @relation(fields: [organisationId], references: [id])
+  status            ClaimStatus @default(REPORTED)
+  incidentDescription String
+  evidenceRefs      String[]    @default([])
+  reportedBy        String
+  claimedLossMinor  BigInt?
+  currency          String?     @db.Char(3)
+  reviewDecision     String?    // AUTO | HUMAN_REVIEW, set once loss is calculated
+  approverSubjectId String?
+  approvalDecision  String?     // APPROVED | REJECTED
+  approvalReason    String?
+  decidedAt         DateTime?
+  settledAt         DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  payouts ClaimPayout[]
+
+  @@index([syndicationId, status])
+  @@index([organisationId])
+}
+
+/// One row per capital provider's share of an approved claim's loss —
+/// computed once, at approval, via the same exact-sum allocation used to
+/// bind the syndication in the first place (ADR-0005). This is the concrete
+/// record of a bound allocation being tested against a real loss.
+model ClaimPayout {
+  id             String   @id @default(uuid())
+  claimId        String
+  claim          Claim    @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  amountMinor    BigInt
+  currency       String   @db.Char(3)
+  createdAt      DateTime @default(now())
+
+  @@unique([claimId, organisationId])
+  @@index([claimId])
+  @@index([organisationId])
 }

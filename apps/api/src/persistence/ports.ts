@@ -224,6 +224,64 @@ export interface CapitalRepository {
   findCommitment(organisationId: string): Promise<StoredCapitalCommitment | undefined>;
 }
 
+export interface StoredClaim {
+  id: string;
+  syndicationId: string;
+  riskId: string;
+  organisationId: string;
+  status: 'REPORTED' | 'EVIDENCE_COLLECTED' | 'VERIFIED' | 'COVERAGE_CONFIRMED' | 'LOSS_CALCULATED' | 'AWAITING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'SETTLED';
+  incidentDescription: string;
+  evidenceRefs: string[];
+  reportedBy: string;
+  claimedLoss: Money | null;
+  reviewDecision: 'AUTO' | 'HUMAN_REVIEW' | null;
+  approverSubjectId: string | null;
+  approvalDecision: 'APPROVED' | 'REJECTED' | null;
+  approvalReason: string | null;
+  decidedAt: Date | null;
+  settledAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface StoredClaimPayout {
+  claimId: string;
+  organisationId: string;
+  amount: Money;
+}
+
+export interface ClaimsRepository {
+  create(input: {
+    id: string;
+    syndicationId: string;
+    riskId: string;
+    organisationId: string;
+    incidentDescription: string;
+    reportedBy: string;
+  }): Promise<StoredClaim>;
+  find(id: string): Promise<StoredClaim | undefined>;
+  listBySyndication(syndicationId: string): Promise<StoredClaim[]>;
+
+  addEvidence(id: string, evidenceRef: string): Promise<StoredClaim>;
+  setStatus(id: string, status: StoredClaim['status']): Promise<StoredClaim>;
+  setLoss(id: string, claimedLoss: Money, reviewDecision: 'AUTO' | 'HUMAN_REVIEW', status: StoredClaim['status']): Promise<StoredClaim>;
+  setApproval(
+    id: string,
+    approverSubjectId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    reason: string,
+    decidedAt: Date,
+    status: StoredClaim['status'],
+  ): Promise<StoredClaim>;
+  setSettled(id: string, settledAt: Date): Promise<StoredClaim>;
+
+  /** Total claimed loss for every APPROVED or SETTLED claim on a syndication — the running total requireCoverage enforces against. */
+  totalApprovedLoss(syndicationId: string, currency: string): Promise<Money>;
+
+  recordPayouts(claimId: string, payouts: readonly StoredClaimPayout[]): Promise<void>;
+  listPayouts(claimId: string): Promise<StoredClaimPayout[]>;
+}
+
 export const IDENTITY_REPOSITORY = Symbol('IDENTITY_REPOSITORY');
 export const AUDIT_REPOSITORY = Symbol('AUDIT_REPOSITORY');
 export const GRAPH_REPOSITORY = Symbol('GRAPH_REPOSITORY');
@@ -232,6 +290,7 @@ export const UNDERWRITING_REPOSITORY = Symbol('UNDERWRITING_REPOSITORY');
 export const MARKETPLACE_REPOSITORY = Symbol('MARKETPLACE_REPOSITORY');
 export const SYNDICATION_REPOSITORY = Symbol('SYNDICATION_REPOSITORY');
 export const CAPITAL_REPOSITORY = Symbol('CAPITAL_REPOSITORY');
+export const CLAIMS_REPOSITORY = Symbol('CLAIMS_REPOSITORY');
 export const CLOCK = Symbol('CLOCK');
 
 export interface Clock {

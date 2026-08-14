@@ -24,9 +24,12 @@ import { SyndicationController } from './syndication/syndication.controller.js';
 import { SyndicationService } from './syndication/syndication.service.js';
 import { CapitalController } from './capital/capital.controller.js';
 import { CapitalService } from './capital/capital.service.js';
+import { ClaimsController } from './claims/claims.controller.js';
+import { ClaimsService } from './claims/claims.service.js';
 import {
   AUDIT_REPOSITORY,
   CAPITAL_REPOSITORY,
+  CLAIMS_REPOSITORY,
   CLOCK,
   GRAPH_REPOSITORY,
   IDENTITY_REPOSITORY,
@@ -38,6 +41,7 @@ import {
 import {
   PrismaAuditRepository,
   PrismaCapitalRepository,
+  PrismaClaimsRepository,
   PrismaGraphRepository,
   PrismaIdentityRepository,
   PrismaMarketplaceRepository,
@@ -60,6 +64,7 @@ const CONTROLLERS = [
   MarketplaceController,
   SyndicationController,
   CapitalController,
+  ClaimsController,
 ];
 
 const SERVICES = [
@@ -72,11 +77,12 @@ const SERVICES = [
   MarketplaceService,
   SyndicationService,
   CapitalService,
+  ClaimsService,
   AuditService,
 ];
 
 /**
- * Phase 1–6 composition. Persistence is injected through ports, so the test
+ * Phase 1–7 composition. Persistence is injected through ports, so the test
  * suite supplies in-memory adapters and everything above them is identical.
  */
 @Module({})
@@ -90,6 +96,7 @@ export class AppModule {
     marketplace: unknown;
     syndication: unknown;
     capital: unknown;
+    claims: unknown;
     clock: unknown;
     analystProvider?: unknown;
     extra?: unknown[];
@@ -107,6 +114,7 @@ export class AppModule {
         { provide: MARKETPLACE_REPOSITORY, useValue: providers.marketplace },
         { provide: SYNDICATION_REPOSITORY, useValue: providers.syndication },
         { provide: CAPITAL_REPOSITORY, useValue: providers.capital },
+        { provide: CLAIMS_REPOSITORY, useValue: providers.claims },
         { provide: CLOCK, useValue: providers.clock },
         {
           provide: ANALYST_PROVIDER,
@@ -134,6 +142,7 @@ export class AppModule {
         { provide: MARKETPLACE_REPOSITORY, useClass: PrismaMarketplaceRepository },
         { provide: SYNDICATION_REPOSITORY, useClass: PrismaSyndicationRepository },
         { provide: CAPITAL_REPOSITORY, useClass: PrismaCapitalRepository },
+        { provide: CLAIMS_REPOSITORY, useClass: PrismaClaimsRepository },
         { provide: CLOCK, useClass: SystemClock },
         { provide: ANALYST_PROVIDER, useFactory: createAnalystProvider },
         { provide: APP_GUARD, useClass: ApiCredentialGuard },
