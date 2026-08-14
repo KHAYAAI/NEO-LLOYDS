@@ -23,3 +23,4 @@ export * from './audit.js';
 export * from './scoring.js';
 export * from './analyst.js';
 export * from './submission.js';
+export * from './underwriting.js';

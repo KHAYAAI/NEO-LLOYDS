@@ -16,6 +16,8 @@ import { AnalystController } from './analyst/analyst.controller.js';
 import { AnalystService } from './analyst/analyst.service.js';
 import { ANALYST_PROVIDER } from './analyst/tokens.js';
 import { createAnalystProvider, NullAnalystProvider } from './analyst/providers.js';
+import { UnderwritingController } from './underwriting/underwriting.controller.js';
+import { UnderwritingService } from './underwriting/underwriting.service.js';
 import {
   AUDIT_REPOSITORY,
   CLOCK,
@@ -38,6 +40,7 @@ const CONTROLLERS = [
   ScoringController,
   SubmissionController,
   AnalystController,
+  UnderwritingController,
 ];
 
 /**
@@ -63,6 +66,7 @@ export class AppModule {
         ScoringService,
         SubmissionService,
         AnalystService,
+        UnderwritingService,
         AuditService,
         { provide: IDENTITY_REPOSITORY, useValue: providers.identity },
         { provide: AUDIT_REPOSITORY, useValue: providers.audit },
@@ -90,6 +94,7 @@ export class AppModule {
         ScoringService,
         SubmissionService,
         AnalystService,
+        UnderwritingService,
         AuditService,
         { provide: IDENTITY_REPOSITORY, useClass: PrismaIdentityRepository },
         { provide: AUDIT_REPOSITORY, useClass: PrismaAuditRepository },

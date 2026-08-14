@@ -79,6 +79,7 @@ beforeAll(async () => {
   const root = await bootstrapOrganisation('Neo-Lloyds Root', ['*'], [
     'RISK_ORIGINATOR',
     'BROKER',
+    'UNDERWRITER',
   ]);
   rootOrgId = root.id;
   rootToken = root.token;
@@ -548,5 +549,109 @@ describe('Phase 2: risk submission workflow', () => {
       .get(`/submissions/${created.body.submission.id}`)
       .set('Authorization', `Bearer ${other.token}`)
       .expect(403);
+  });
+});
+
+describe('Phase 3: underwriting assessment and approval gate', () => {
+  function assessBody(overrides: Record<string, unknown> = {}) {
+    return {
+      factors: [
+        {
+          key: 'f1',
+          description: 'test factor',
+          weight: 1,
+          likelihood: 0.01,
+          confidence: 0.95,
+          basis: 'STATISTICAL_MODEL',
+        },
+      ],
+      maximumEstimatedLossMinor: 1_000_000_00,
+      currency: 'USD',
+      durationDays: 14,
+      mitigationCoverage: 0,
+      correlatedRiskCount: 0,
+      concentrationShare: 0,
+      ...overrides,
+    };
+  }
+
+  it('a LOW-band assessment clears with no approval recorded', async () => {
+    const risk = await createNode('RISK', 'low-band-risk');
+    const assessed = await authed()
+      .post(`/underwriting/risks/${risk}/assess`)
+      .send(assessBody())
+      .expect(201);
+
+    expect(assessed.body.assessment.band).toBe('LOW');
+    expect(assessed.body.assessment.requiresHumanApproval).toBe(false);
+
+    await authed().get(`/underwriting/risks/${risk}/clearance`).expect(200);
+  });
+
+  it('a HIGH-band assessment blocks clearance until an underwriter approves', async () => {
+    const risk = await createNode('RISK', 'high-band-risk');
+    const assessed = await authed()
+      .post(`/underwriting/risks/${risk}/assess`)
+      .send(assessBody({ factors: [{ key: 'f1', description: 'd', weight: 1, likelihood: 0.3, confidence: 0.9, basis: 'STATISTICAL_MODEL' }] }))
+      .expect(201);
+    expect(assessed.body.assessment.requiresHumanApproval).toBe(true);
+
+    const blocked = await authed().get(`/underwriting/risks/${risk}/clearance`);
+    expect(blocked.status).toBe(422);
+    expect(blocked.body.error.code).toBe('APPROVAL_REQUIRED');
+
+    await authed()
+      .post(`/underwriting/risks/${risk}/approve`)
+      .send({ decision: 'APPROVED', reason: 'Reviewed and acceptable.' })
+      .expect(201);
+
+    await authed().get(`/underwriting/risks/${risk}/clearance`).expect(200);
+  });
+
+  it('a rejected decision keeps the risk blocked', async () => {
+    const risk = await createNode('RISK', 'rejected-risk');
+    await authed()
+      .post(`/underwriting/risks/${risk}/assess`)
+      .send(assessBody({ factors: [{ key: 'f1', description: 'd', weight: 1, likelihood: 0.3, confidence: 0.9, basis: 'STATISTICAL_MODEL' }] }))
+      .expect(201);
+
+    await authed()
+      .post(`/underwriting/risks/${risk}/approve`)
+      .send({ decision: 'REJECTED', reason: 'Too concentrated.' })
+      .expect(201);
+
+    const blocked = await authed().get(`/underwriting/risks/${risk}/clearance`);
+    expect(blocked.status).toBe(422);
+    expect(blocked.body.error.code).toBe('NOT_APPROVED');
+  });
+
+  it('only an UNDERWRITER may approve', async () => {
+    const risk = await createNode('RISK', 'no-underwriter-role-risk');
+    await authed().post(`/underwriting/risks/${risk}/assess`).send(assessBody()).expect(201);
+
+    const broker = await bootstrapOrganisation('Broker Only Ltd', ['underwriting:approve'], [
+      'BROKER',
+    ]);
+    const response = await request(http)
+      .post(`/underwriting/risks/${risk}/approve`)
+      .set('Authorization', `Bearer ${broker.token}`)
+      .send({ decision: 'APPROVED', reason: 'x' });
+    expect(response.status).toBe(403);
+  });
+
+  it('marks a risk with no data as ineligible, not silently priced', async () => {
+    const risk = await createNode('RISK', 'no-data-risk');
+    const response = await authed()
+      .post(`/underwriting/risks/${risk}/assess`)
+      .send(assessBody({ factors: [] }))
+      .expect(201);
+    expect(response.body.assessment.eligible).toBe(false);
+  });
+
+  it('clearance 404s when no assessment has ever been recorded', async () => {
+    const risk = await createNode('RISK', 'never-assessed-risk');
+    const response = await authed().get(`/underwriting/risks/${risk}/clearance`);
+    expect(response.status).toBe(422);
+    expect(response.body.error.code).toBe('NOT_ASSESSED');
   });
 });

@@ -84,6 +84,20 @@ Submissions are held in-memory in Phase 2 (not yet a Prisma table): the
 workflow is what's new, and persisting it gains a real consumer once Phase 4
 marketplace listing exists to act on a `READY_FOR_UNDERWRITING` submission.
 
+## Underwriting (Phase 3)
+
+| Method | Path | Scope / roles | Notes |
+|---|---|---|---|
+| POST | `/underwriting/risks/:id/assess` | `underwriting:assess` + `UNDERWRITER` | Scores and assesses in one call; returns band, premium range, capital requirement, exclusions, conditions, required evidence |
+| GET | `/underwriting/risks/:id/assessment` | `underwriting:read` | The most recent assessment recorded |
+| POST | `/underwriting/risks/:id/approve` | `underwriting:approve` + `UNDERWRITER` | Records a human decision (`APPROVED`/`REJECTED`); role-gated, not just scope-gated |
+| GET | `/underwriting/risks/:id/clearance` | `underwriting:read` | `200` if clear to proceed; `422` with `NOT_ASSESSED`, `APPROVAL_REQUIRED`, `STALE_APPROVAL`, or `NOT_APPROVED` otherwise |
+
+`LOW` band clears automatically with no approval call. `MEDIUM`/`HIGH`/`EXTREME`
+are blocked at `clearance` until a matching `APPROVED` decision exists — this
+is the single choke point later phases (marketplace, syndication) call before
+treating a risk as underwritten. Approvals are held in-memory in Phase 3.
+
 ## Errors
 
 Domain invariant violations return `422` with a machine-readable code:

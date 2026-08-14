@@ -30,11 +30,19 @@ documentation, local deployment, passing tests.
   introduces (`ANTHROPIC_API_KEY`, optional) and what it does *not* yet
   depend on (calibrated actuarial data — flagged for before production use).
 
-## Phase 3 — Underwriting
-Risk package → underwriting assessment (eligible, score, expected loss, premium
-*range*, capital requirement, capacity, exclusions, conditions, required
-evidence, model confidence). Configurable approval thresholds with human review
-queues.
+## Phase 3 — Underwriting — **DELIVERED**
+
+- `assessUnderwriting()`: eligibility, band, suggested premium range, capital
+  requirement, suggested capacity, exclusions, conditions, required evidence.
+- Configurable `ApprovalThresholds`; `classifyBand()` maps a `RiskScore` onto
+  `LOW/MEDIUM/HIGH/EXTREME`.
+- `requireApprovalIfNeeded()` is the enforcement point: no automated path can
+  treat a MEDIUM+ assessment as cleared without a recorded, matching, approved
+  `UnderwritingApproval` — checked and gated behind the `UNDERWRITER` role.
+- See `docs/reports/phase-3.md` for a real bug the test suite caught before
+  shipping (automation eligibility was gated on the wrong confidence figure),
+  and what remains a data/expertise dependency rather than a code one
+  (uncalibrated thresholds).
 
 ## Phase 4 — Marketplace
 Listings, capital-provider appetite (risk classes, max exposure, geography,

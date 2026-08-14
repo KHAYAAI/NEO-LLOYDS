@@ -16,18 +16,19 @@ transferable and financeable — by machines as well as by people. Strategic HQ:
 Johannesburg; the architecture is globally deployable and jurisdiction-neutral
 at its core.
 
-## Status: Phases 1–2 delivered
+## Status: Phases 1–3 delivered
 
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Identity · Risk ontology · Risk graph | **Delivered** |
 | 2 | Risk submission · Deterministic scoring · AI analyst | **Delivered** |
-| 3–11 | Underwriting, marketplace, syndication, capital ledger, claims, simulation, reinsurance, settlement, agent API | Specified, not built — `docs/roadmap.md` |
+| 3 | Underwriting: assessment, approval bands, human-approval gate | **Delivered** |
+| 4–11 | Marketplace, syndication, capital ledger, claims, simulation, reinsurance, settlement, agent API | Specified, not built — `docs/roadmap.md` |
 
 Each phase is built vertically: domain logic, migrations where applicable,
 API, authn/authz, audit logging, error handling, docs and a passing test
-suite. See `docs/reports/phase-2.md` for what Phase 2 depends on externally
-before it can move real capital.
+suite. See `docs/reports/phase-2.md` and `docs/reports/phase-3.md` for what
+each phase depends on externally before it can inform a real decision.
 
 ## Quick start
 
@@ -47,7 +48,7 @@ npm -w @neo-lloyds/api run build && npm -w @neo-lloyds/api start
 API on `:3001`, OpenAPI at `/docs`.
 
 ```bash
-npm test        # 84 tests
+npm test        # 103 tests
 npm run typecheck
 npm run lint
 ```
