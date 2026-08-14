@@ -78,10 +78,23 @@ documentation, local deployment, passing tests.
   database triggers were proven with raw SQL *before* any service code was
   written against them.
 
-## Phase 6 — Capital Ledger
-Committed / available / allocated / reserved / exposed / released capital,
-claims and recoveries. Concentration by geography, industry, risk class,
-counterparty, event, asset. Integer minor units throughout.
+## Phase 6 — Capital Ledger — **DELIVERED**
+
+- `computePosition`: committed / allocated (BOUND) / reserved (OPEN) /
+  available / utilisation, computed live from every `SyndicationAllocation`
+  a provider holds across every syndication — never a separately maintained
+  running total that could drift.
+- `requireCapacityForProposal`: the cross-syndication enforcement point,
+  wired into `SyndicationService.propose` immediately after Phase 5's
+  per-listing exposure check. A provider must declare a committed-capital
+  ceiling before proposing anything at all (`422 NO_CAPITAL_COMMITMENT`).
+- `concentrationBy`: risk class, jurisdiction, counterparty. Industry, event
+  and asset concentration are not yet computable — the risk graph doesn't
+  carry those as structured fields on a listing yet, stated as a real gap in
+  `docs/reports/phase-6.md`, not worked around with fabricated data.
+- Verified live with the scenario the phase exists to catch: two listings,
+  each individually within a provider's per-listing appetite, together
+  exceeding its total committed capital — caught only by this phase's check.
 
 ## Phase 7 — Claims
 Incident → evidence → verification → policy match → coverage check → loss

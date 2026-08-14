@@ -2,18 +2,23 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
   bindAllocations,
+  computePosition,
   DomainError,
   proposeAllocation,
   removeAllocation as removeAllocationDomain,
   requireAnyRole,
+  requireCapacityForProposal,
   requireTenantAccess,
   type Allocation,
+  type AllocationContribution,
   type AuthContext,
 } from '@neo-lloyds/domain';
 import {
+  CAPITAL_REPOSITORY,
   CLOCK,
   MARKETPLACE_REPOSITORY,
   SYNDICATION_REPOSITORY,
+  type CapitalRepository,
   type Clock,
   type MarketplaceRepository,
   type StoredSyndication,
@@ -43,6 +48,7 @@ export class SyndicationService {
   constructor(
     @Inject(SYNDICATION_REPOSITORY) private readonly syndications: SyndicationRepository,
     @Inject(MARKETPLACE_REPOSITORY) private readonly marketplace: MarketplaceRepository,
+    @Inject(CAPITAL_REPOSITORY) private readonly capitalRepo: CapitalRepository,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(AuditService) private readonly audit: AuditService,
   ) {}
@@ -126,7 +132,10 @@ export class SyndicationService {
     const appetite = await this.marketplace.findAppetite(ctx.organisationId);
 
     // Throws DUPLICATE_ALLOCATION / OVER_ALLOCATION / EXPOSURE_LIMIT_EXCEEDED
-    // as appropriate. Still a proposal: nothing here commits any capital.
+    // as appropriate. This check alone is necessarily local to this one
+    // listing — it has no visibility into what else the provider has
+    // proposed or bound elsewhere on the platform. Still a proposal: nothing
+    // here commits any capital.
     const updated = proposeAllocation(
       current,
       { organisationId: ctx.organisationId, shareBps },
@@ -135,6 +144,40 @@ export class SyndicationService {
     );
     const added = updated.find((a) => a.organisationId === ctx.organisationId);
     if (!added) throw new Error('Invariant violated: proposed allocation missing after add');
+
+    // THE CROSS-SYNDICATION CHECK (Phase 6). Everything above this line only
+    // ever sees this one syndication. A provider could pass every check
+    // above on ten different listings simultaneously and still be proposing
+    // far more capital than it has ever committed to the platform — this is
+    // the one place that is caught, because it is the only check built from
+    // *every* syndication the provider participates in, not one.
+    const commitment = await this.capitalRepo.findCommitment(ctx.organisationId);
+    if (!commitment) {
+      throw new DomainError(
+        'A capital provider must set a committed capital ceiling before proposing any allocation',
+        'NO_CAPITAL_COMMITMENT',
+        { organisationId: ctx.organisationId },
+      );
+    }
+    const rawContributions = await this.syndications.listAllocationsForOrganisation(ctx.organisationId);
+    const contributions: AllocationContribution[] = rawContributions.map((c) => ({
+      ...c,
+      riskClass: 'UNSPECIFIED',
+      jurisdiction: 'ZZ',
+      counterpartyOrganisationId: 'UNSPECIFIED',
+    }));
+    const position = computePosition(
+      {
+        organisationId: commitment.organisationId,
+        committed: commitment.committed,
+        updatedAt: commitment.updatedAt.toISOString(),
+      },
+      contributions,
+    );
+    // Throws INSUFFICIENT_COMMITTED_CAPITAL if this proposal, on top of
+    // every other allocation this provider holds anywhere, would exceed its
+    // declared platform-wide ceiling.
+    requireCapacityForProposal(position, added.amount);
 
     await this.syndications.addAllocation(
       syndicationId,

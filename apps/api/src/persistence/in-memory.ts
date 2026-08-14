@@ -17,10 +17,12 @@ import {
 import type {
   AllocationEvent,
   AuditRepository,
+  CapitalRepository,
   Clock,
   GraphRepository,
   IdentityRepository,
   MarketplaceRepository,
+  StoredCapitalCommitment,
   StoredCredential,
   StoredInterest,
   StoredListing,
@@ -430,9 +432,44 @@ export class InMemorySyndicationRepository implements SyndicationRepository {
     return this.events.get(syndicationId) ?? [];
   }
 
+  async listAllocationsForOrganisation(
+    organisationId: string,
+  ): Promise<{ syndicationId: string; status: 'OPEN' | 'BOUND' | 'CANCELLED'; listingId: string; amount: Money }[]> {
+    const result: { syndicationId: string; status: 'OPEN' | 'BOUND' | 'CANCELLED'; listingId: string; amount: Money }[] = [];
+    for (const [syndicationId, allocations] of this.allocations.entries()) {
+      const syndication = this.syndications.get(syndicationId);
+      if (!syndication) continue;
+      for (const allocation of allocations) {
+        if (allocation.organisationId === organisationId) {
+          result.push({
+            syndicationId,
+            status: syndication.status,
+            listingId: syndication.listingId,
+            amount: allocation.amount,
+          });
+        }
+      }
+    }
+    return result;
+  }
+
   private appendEvent(syndicationId: string, event: AllocationEvent): void {
     const list = this.events.get(syndicationId) ?? [];
     this.events.set(syndicationId, [...list, event]);
+  }
+}
+
+export class InMemoryCapitalRepository implements CapitalRepository {
+  private readonly commitments = new Map<string, StoredCapitalCommitment>();
+
+  async upsertCommitment(organisationId: string, committed: Money): Promise<StoredCapitalCommitment> {
+    const commitment: StoredCapitalCommitment = { organisationId, committed, updatedAt: new Date() };
+    this.commitments.set(organisationId, commitment);
+    return commitment;
+  }
+
+  async findCommitment(organisationId: string): Promise<StoredCapitalCommitment | undefined> {
+    return this.commitments.get(organisationId);
   }
 }
 

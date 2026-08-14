@@ -132,6 +132,22 @@ correct across a restart.
 | GET | `/syndication/:id/events` | `syndication:read` | — | The complete, immutable history: every `PROPOSED`/`REMOVED`/`BOUND` event, forever, enforced append-only by a database trigger |
 | POST | `/syndication/:id/bind` | `syndication:manage` + originator/broker | **YES — THE BINDING CALL** | Requires proposals summing to exactly 100% (`422 INCOMPLETE_ALLOCATION` otherwise). Only the listing owner may call this — never a capital provider (`403`). After it returns: the syndication is `BOUND`, the listing is `MATCHED`, and a database trigger refuses any further mutation of this syndication's allocations, independent of application code. |
 
+## Capital Ledger (Phase 6)
+
+| Method | Path | Scope / roles | Notes |
+|---|---|---|---|
+| POST | `/capital/commitments` | `capital:manage` + `CAPITAL_PROVIDER` | Sets the caller's platform-wide committed capital ceiling. Required before proposing any syndication allocation (`422 NO_CAPITAL_COMMITMENT` otherwise). |
+| GET | `/capital/commitments` | `capital:read` | |
+| GET | `/capital/exposure` | `capital:read` | `{committed, allocated, reserved, available, utilisationBps}`, computed live from every syndication the caller holds — the first cross-syndication view in the system. |
+| GET | `/capital/concentration?by=riskClass\|jurisdiction\|counterparty` | `capital:read` | Exposure grouped by the given key, with each bucket's share of total exposure. Industry, event and asset concentration are not yet computable — see the Phase 6 report. |
+
+Every `POST /syndication/:id/allocations` call now also enforces
+`requireCapacityForProposal`: a proposal that is fine against its own
+listing's exposure limit is still rejected with
+`422 INSUFFICIENT_COMMITTED_CAPITAL` if it would push the caller's *total*
+exposure, summed across every syndication it participates in, past its
+declared committed capital.
+
 ## Errors
 
 Domain invariant violations return `422` with a machine-readable code:
@@ -155,6 +171,7 @@ Codes: `INVALID_EDGE`, `DEPENDENCY_CYCLE`, `UNKNOWN_NODE`, `INVALID_PROVENANCE`,
 `LISTING_NOT_OPEN`, `CURRENCY_MISMATCH`, `ALREADY_SYNDICATED`,
 `SYNDICATION_NOT_OPEN`, `NO_LIVE_INTEREST`, `INVALID_SHARE`,
 `DUPLICATE_ALLOCATION`, `OVER_ALLOCATION`, `EXPOSURE_LIMIT_EXCEEDED`,
-`ALLOCATION_NOT_FOUND`, `INCOMPLETE_ALLOCATION`, `FORBIDDEN`
+`ALLOCATION_NOT_FOUND`, `INCOMPLETE_ALLOCATION`, `NO_CAPITAL_COMMITMENT`,
+`INSUFFICIENT_COMMITTED_CAPITAL`, `FORBIDDEN`
 (403). Malformed or unknown request fields return `400`; unauthenticated `401`;
 missing scope or role `403`.

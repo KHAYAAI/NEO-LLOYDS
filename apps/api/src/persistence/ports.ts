@@ -197,6 +197,31 @@ export interface SyndicationRepository {
   ): Promise<StoredSyndication>;
 
   listEvents(syndicationId: string): Promise<AllocationEvent[]>;
+
+  /**
+   * Every allocation contribution an organisation holds, across every
+   * syndication on the platform — not scoped to one listing. This is the
+   * query the capital ledger (Phase 6) is built on: it is what makes a
+   * provider's *total* exposure computable at all, rather than only
+   * observable one syndication at a time. Deliberately returns only
+   * syndication-owned fields; the caller enriches each contribution with
+   * listing detail (risk class, jurisdiction, counterparty) via
+   * `MarketplaceRepository`, same layering as every other service.
+   */
+  listAllocationsForOrganisation(
+    organisationId: string,
+  ): Promise<{ syndicationId: string; status: 'OPEN' | 'BOUND' | 'CANCELLED'; listingId: string; amount: Money }[]>;
+}
+
+export interface StoredCapitalCommitment {
+  organisationId: string;
+  committed: Money;
+  updatedAt: Date;
+}
+
+export interface CapitalRepository {
+  upsertCommitment(organisationId: string, committed: Money): Promise<StoredCapitalCommitment>;
+  findCommitment(organisationId: string): Promise<StoredCapitalCommitment | undefined>;
 }
 
 export const IDENTITY_REPOSITORY = Symbol('IDENTITY_REPOSITORY');
@@ -206,6 +231,7 @@ export const SUBMISSION_REPOSITORY = Symbol('SUBMISSION_REPOSITORY');
 export const UNDERWRITING_REPOSITORY = Symbol('UNDERWRITING_REPOSITORY');
 export const MARKETPLACE_REPOSITORY = Symbol('MARKETPLACE_REPOSITORY');
 export const SYNDICATION_REPOSITORY = Symbol('SYNDICATION_REPOSITORY');
+export const CAPITAL_REPOSITORY = Symbol('CAPITAL_REPOSITORY');
 export const CLOCK = Symbol('CLOCK');
 
 export interface Clock {

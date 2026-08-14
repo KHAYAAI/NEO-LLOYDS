@@ -16,7 +16,7 @@ transferable and financeable — by machines as well as by people. Strategic HQ:
 Johannesburg; the architecture is globally deployable and jurisdiction-neutral
 at its core.
 
-## Status: Phases 1–5 delivered
+## Status: Phases 1–6 delivered
 
 | Phase | Scope | State |
 |---|---|---|
@@ -25,18 +25,21 @@ at its core.
 | 3 | Underwriting: assessment, approval bands, human-approval gate | **Delivered** |
 | 4 | Marketplace: listings, capital appetite, matching, interest — submissions and underwriting now durable | **Delivered** |
 | 5 | Syndication: allocations summing to exactly 100%, immutable history, binding enforced by database trigger | **Delivered** |
-| 6–11 | Capital ledger, claims, simulation, reinsurance, settlement, agent API | Specified, not built — `docs/roadmap.md` |
+| 6 | Capital ledger: committed/allocated/reserved/available capital and concentration, computed live across every syndication a provider holds | **Delivered** |
+| 7–11 | Claims, simulation, reinsurance, settlement, agent API | Specified, not built — `docs/roadmap.md` |
 
 Each phase is built vertically: domain logic, migrations where applicable,
 API, authn/authz, audit logging, error handling, docs and a passing test
-suite. See `docs/reports/phase-2.md` through `docs/reports/phase-5.md` for
+suite. See `docs/reports/phase-2.md` through `docs/reports/phase-6.md` for
 what each phase depends on externally before it can inform a real decision.
 Phase 4's report proves durability (a full workflow, a server restart,
 confirmation everything survived). Phase 5's report states, precisely, the
 one function and one API call where the system crosses from non-binding
-interest to a binding capital commitment — and proves that once bound, the
-database itself refuses any further mutation, independent of the
-application code's correctness.
+interest to a binding capital commitment. Phase 6's report walks through a
+scenario built specifically to be invisible to every check that existed
+before it: a provider spread thin across two separate listings, each
+individually within its per-listing appetite, caught only once its total
+committed capital is computed across both at once.
 
 ## Quick start
 
@@ -56,7 +59,7 @@ npm -w @neo-lloyds/api run build && npm -w @neo-lloyds/api start
 API on `:3001`, OpenAPI at `/docs`.
 
 ```bash
-npm test        # 139 tests
+npm test        # 156 tests
 npm run typecheck
 npm run lint
 ```

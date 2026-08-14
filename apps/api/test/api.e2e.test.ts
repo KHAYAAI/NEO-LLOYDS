@@ -13,6 +13,7 @@ import {
   InMemoryIdentityRepository,
   InMemoryMarketplaceRepository,
   InMemorySubmissionRepository,
+  InMemoryCapitalRepository,
   InMemorySyndicationRepository,
   InMemoryUnderwritingRepository,
   SystemClock,
@@ -26,6 +27,7 @@ const submissionRepo = new InMemorySubmissionRepository();
 const underwritingRepo = new InMemoryUnderwritingRepository();
 const marketplaceRepo = new InMemoryMarketplaceRepository();
 const syndicationRepo = new InMemorySyndicationRepository();
+const capitalRepo = new InMemoryCapitalRepository();
 
 let app: INestApplication;
 let http: string;
@@ -74,6 +76,7 @@ beforeAll(async () => {
         underwriting: underwritingRepo,
         marketplace: marketplaceRepo,
         syndication: syndicationRepo,
+        capital: capitalRepo,
         clock: new SystemClock(),
       }),
     ],
@@ -845,6 +848,15 @@ describe('Phase 5: syndication', () => {
       .post(`/marketplace/listings/${listingId}/interest`)
       .send({ indicativeAmountMinor, currency: 'USD' })
       .expect(201);
+    // A Phase 6 precondition: a provider must have a committed capital
+    // ceiling before it may propose any allocation. Generously sized here so
+    // Phase 5's own tests (which predate the capital ledger) are unaffected
+    // by it; the capital-ledger-specific tests below set tighter ceilings
+    // deliberately to exercise INSUFFICIENT_COMMITTED_CAPITAL.
+    await authedAs()
+      .post('/capital/commitments')
+      .send({ committedMinor: 100_000_000, currency: 'USD' })
+      .expect(201);
     return { ...provider, authedAs };
   }
 
@@ -1003,5 +1015,198 @@ describe('Phase 5: syndication', () => {
     const events = await authed().get(`/syndication/${syndication.id}/events`).expect(200);
     const actions = events.body.events.map((e: { action: string }) => e.action);
     expect(actions).toContain('REMOVED');
+  });
+});
+
+describe('Phase 6: capital ledger — cross-syndication exposure', () => {
+  async function openListing(riskLabel: string, capacityMinor = 10_000) {
+    const risk = await createNode('RISK', riskLabel);
+    const submission = await authed()
+      .post('/submissions')
+      .send({ riskId: risk, title: riskLabel })
+      .then((r) => r.body.submission);
+
+    await authed().post(`/underwriting/risks/${risk}/assess`).send({
+      factors: [
+        { key: 'f1', description: 'd', weight: 1, likelihood: 0.01, confidence: 0.95, basis: 'STATISTICAL_MODEL' },
+      ],
+      maximumEstimatedLossMinor: 10000,
+      currency: 'USD',
+      durationDays: 30,
+      mitigationCoverage: 0,
+      correlatedRiskCount: 0,
+      concentrationShare: 0,
+    });
+    for (const to of ['SUBMITTED', 'ANALYSING', 'SCORED', 'READY_FOR_UNDERWRITING']) {
+      await authed().post(`/submissions/${submission.id}/advance`).send({ to });
+    }
+
+    const listing = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: submission.id, riskClass: 'LEDGER_TEST', capacityMinor, currency: 'USD', durationDays: 30 })
+      .then((r) => r.body.listing);
+
+    const syndication = await authed()
+      .post('/syndication')
+      .send({ listingId: listing.id })
+      .then((r) => r.body.syndication);
+
+    return { listingId: listing.id as string, syndicationId: syndication.id as string };
+  }
+
+  function providerAuth(token: string) {
+    return {
+      get: (url: string) => request(http).get(url).set('Authorization', `Bearer ${token}`),
+      post: (url: string) => request(http).post(url).set('Authorization', `Bearer ${token}`),
+    };
+  }
+
+  it('refuses a proposal from a provider with no committed capital at all', async () => {
+    const { listingId, syndicationId } = await openListing('ledger-no-commitment');
+    const provider = await bootstrapOrganisation('No Commitment Provider', ['*'], ['CAPITAL_PROVIDER']);
+    await providerAuth(provider.token)
+      .post(`/marketplace/listings/${listingId}/interest`)
+      .send({ indicativeAmountMinor: 1000, currency: 'USD' })
+      .expect(201);
+
+    const response = await providerAuth(provider.token)
+      .post(`/syndication/${syndicationId}/allocations`)
+      .send({ shareBps: 5000 });
+    expect(response.status).toBe(422);
+    expect(response.body.error.code).toBe('NO_CAPITAL_COMMITMENT');
+  });
+
+  it(
+    "catches an over-extended provider ONLY via the cross-syndication check: two separate listings, each individually within the provider's per-listing appetite, but combined exceeding its total committed capital",
+    async () => {
+      const provider = await bootstrapOrganisation('Cross Syndication Provider', ['*'], [
+        'CAPITAL_PROVIDER',
+      ]);
+
+      // Committed capital: $700. Two listings of $600 capacity each — a 50%
+      // share of either one ($300) is comfortably within a per-listing
+      // appetite ceiling of, say, $1,000. Nothing about either proposal in
+      // isolation looks wrong.
+      await providerAuth(provider.token)
+        .post('/capital/commitments')
+        .send({ committedMinor: 700, currency: 'USD' })
+        .expect(201);
+      await providerAuth(provider.token)
+        .post('/marketplace/appetite')
+        .send({
+          preferredRiskClasses: [],
+          maxExposureMinor: 1000,
+          currency: 'USD',
+          preferredJurisdictions: [],
+          minimumReturnBps: 100,
+          maxDurationDays: 60,
+          riskTolerance: 'MODERATE',
+          concentrationLimitBps: 10_000,
+        })
+        .expect(201);
+
+      const listingA = await openListing('ledger-cross-a', 600);
+      const listingB = await openListing('ledger-cross-b', 600);
+
+      await providerAuth(provider.token)
+        .post(`/marketplace/listings/${listingA.listingId}/interest`)
+        .send({ indicativeAmountMinor: 300, currency: 'USD' })
+        .expect(201);
+      await providerAuth(provider.token)
+        .post(`/marketplace/listings/${listingB.listingId}/interest`)
+        .send({ indicativeAmountMinor: 300, currency: 'USD' })
+        .expect(201);
+
+      // First proposal: $300 of $700 committed. Passes every check,
+      // including the per-listing exposure check (well under $1,000).
+      await providerAuth(provider.token)
+        .post(`/syndication/${listingA.syndicationId}/allocations`)
+        .send({ shareBps: 5000 })
+        .expect(201);
+
+      // Second proposal, on a *different* listing: also $300, also well
+      // under the $1,000 per-listing appetite ceiling — that check alone
+      // would pass it. But $300 + $300 = $600, safely under $700... until
+      // the platform-wide picture also includes reserved capacity properly.
+      // Push it to $500 on listing B specifically to force the total past
+      // the $700 ceiling ($300 + $500 = $800), which no single listing's
+      // view can see.
+      const overExtended = await providerAuth(provider.token)
+        .post(`/syndication/${listingB.syndicationId}/allocations`)
+        .send({ shareBps: 8334 }); // 83.34% of $600 = $500.04 -> $500
+      expect(overExtended.status).toBe(422);
+      expect(overExtended.body.error.code).toBe('INSUFFICIENT_COMMITTED_CAPITAL');
+      expect(overExtended.body.error.details.available).toEqual({ amountMinor: 400, currency: 'USD' });
+    },
+  );
+
+  it('reports a live position summing allocated (BOUND) and reserved (OPEN) across syndications', async () => {
+    const provider = await bootstrapOrganisation('Position Provider', ['*'], ['CAPITAL_PROVIDER']);
+    await providerAuth(provider.token)
+      .post('/capital/commitments')
+      .send({ committedMinor: 10_000, currency: 'USD' })
+      .expect(201);
+
+    const bound = await openListing('ledger-position-bound', 4_000);
+    const open = await openListing('ledger-position-open', 3_000);
+
+    for (const listingId of [bound.listingId, open.listingId]) {
+      await providerAuth(provider.token)
+        .post(`/marketplace/listings/${listingId}/interest`)
+        .send({ indicativeAmountMinor: 1000, currency: 'USD' })
+        .expect(201);
+    }
+
+    await providerAuth(provider.token)
+      .post(`/syndication/${bound.syndicationId}/allocations`)
+      .send({ shareBps: 10_000 })
+      .expect(201);
+    await authed().post(`/syndication/${bound.syndicationId}/bind`).expect(201);
+
+    await providerAuth(provider.token)
+      .post(`/syndication/${open.syndicationId}/allocations`)
+      .send({ shareBps: 5000 })
+      .expect(201);
+
+    const position = await providerAuth(provider.token).get('/capital/exposure').expect(200);
+    expect(position.body.position.allocated.amountMinor).toBe(4_000); // BOUND
+    expect(position.body.position.reserved.amountMinor).toBe(1_500); // OPEN: 50% of 3,000
+    expect(position.body.position.available.amountMinor).toBe(4_500); // 10,000 - 4,000 - 1,500
+  });
+
+  it('reports concentration by risk class across every syndication the provider holds', async () => {
+    const provider = await bootstrapOrganisation('Concentration Provider', ['*'], ['CAPITAL_PROVIDER']);
+    await providerAuth(provider.token)
+      .post('/capital/commitments')
+      .send({ committedMinor: 100_000, currency: 'USD' })
+      .expect(201);
+
+    const a = await openListing('ledger-concentration-a', 6_000);
+    const b = await openListing('ledger-concentration-b', 4_000);
+
+    for (const listingId of [a.listingId, b.listingId]) {
+      await providerAuth(provider.token)
+        .post(`/marketplace/listings/${listingId}/interest`)
+        .send({ indicativeAmountMinor: 1000, currency: 'USD' })
+        .expect(201);
+    }
+    await providerAuth(provider.token)
+      .post(`/syndication/${a.syndicationId}/allocations`)
+      .send({ shareBps: 10_000 })
+      .expect(201);
+    await providerAuth(provider.token)
+      .post(`/syndication/${b.syndicationId}/allocations`)
+      .send({ shareBps: 10_000 })
+      .expect(201);
+
+    const concentration = await providerAuth(provider.token)
+      .get('/capital/concentration?by=riskClass')
+      .expect(200);
+    const total = concentration.body.buckets.reduce(
+      (acc: number, bucket: { amount: { amountMinor: number } }) => acc + bucket.amount.amountMinor,
+      0,
+    );
+    expect(total).toBe(10_000);
+    expect(concentration.body.buckets.every((b: { shareBps: number }) => b.shareBps === 10_000)).toBe(true);
   });
 });

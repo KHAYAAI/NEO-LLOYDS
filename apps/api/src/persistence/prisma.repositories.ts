@@ -1,5 +1,6 @@
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import {
   money,
   provenance,
@@ -21,9 +22,11 @@ import {
 import type {
   AllocationEvent,
   AuditRepository,
+  CapitalRepository,
   GraphRepository,
   IdentityRepository,
   MarketplaceRepository,
+  StoredCapitalCommitment,
   StoredCredential,
   StoredInterest,
   StoredListing,
@@ -947,5 +950,48 @@ export class PrismaSyndicationRepository implements SyndicationRepository {
       actorSubjectId: row.actorSubjectId,
       recordedAt: row.recordedAt,
     }));
+  }
+
+  async listAllocationsForOrganisation(
+    organisationId: string,
+  ): Promise<{ syndicationId: string; status: 'OPEN' | 'BOUND' | 'CANCELLED'; listingId: string; amount: Money }[]> {
+    const rows = await this.prisma.syndicationAllocation.findMany({
+      where: { organisationId },
+      include: { syndication: { select: { status: true, listingId: true } } },
+    });
+    return rows.map((row) => ({
+      syndicationId: row.syndicationId,
+      status: row.syndication.status as 'OPEN' | 'BOUND' | 'CANCELLED',
+      listingId: row.syndication.listingId,
+      amount: money(Number(row.amountMinor), row.currency),
+    }));
+  }
+}
+
+@Injectable()
+export class PrismaCapitalRepository implements CapitalRepository {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  async upsertCommitment(organisationId: string, committed: Money): Promise<StoredCapitalCommitment> {
+    const row = await this.prisma.capitalCommitment.upsert({
+      where: { organisationId },
+      create: {
+        id: randomUUID(),
+        organisationId,
+        committedMinor: BigInt(committed.amountMinor),
+        currency: committed.currency,
+      },
+      update: {
+        committedMinor: BigInt(committed.amountMinor),
+        currency: committed.currency,
+      },
+    });
+    return { organisationId, committed: money(Number(row.committedMinor), row.currency), updatedAt: row.updatedAt };
+  }
+
+  async findCommitment(organisationId: string): Promise<StoredCapitalCommitment | undefined> {
+    const row = await this.prisma.capitalCommitment.findUnique({ where: { organisationId } });
+    if (!row) return undefined;
+    return { organisationId, committed: money(Number(row.committedMinor), row.currency), updatedAt: row.updatedAt };
   }
 }

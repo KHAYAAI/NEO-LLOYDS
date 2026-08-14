@@ -70,6 +70,7 @@ model Organisation {
   capitalInterests       CapitalInterest[]
   syndications           Syndication[]
   syndicationAllocations SyndicationAllocation[]
+  capitalCommitment      CapitalCommitment?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -490,4 +491,21 @@ model SyndicationAllocationEvent {
   recordedAt     DateTime    @default(now())
 
   @@index([syndicationId, recordedAt])
+}
+
+// ---------------------------------------------------------- capital ledger
+
+/// A capital provider's declared platform-wide ceiling (brief §10). Exposure
+/// itself is not stored here — it is computed on read from every
+/// SyndicationAllocation the provider holds, across every syndication, so
+/// there is exactly one source of truth for "what has this provider actually
+/// allocated" and it cannot drift from a separately-maintained running total.
+model CapitalCommitment {
+  id             String       @id @default(uuid())
+  organisationId String       @unique
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  committedMinor BigInt
+  currency       String       @db.Char(3)
+  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime     @default(now())
 }
