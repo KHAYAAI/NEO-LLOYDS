@@ -117,6 +117,21 @@ correct across a restart.
 | DELETE | `/marketplace/listings/:id/interest` | `marketplace:interest` + `CAPITAL_PROVIDER` | Withdraws the caller's own interest |
 | GET | `/marketplace/listings/:id/interest` | `marketplace:read` | Listing owner only |
 
+## Syndication (Phase 5)
+
+> This is where the system crosses from non-binding to binding. Every
+> endpoint below is annotated with which side of that line it's on.
+
+| Method | Path | Scope / roles | Binding? | Notes |
+|---|---|---|---|---|
+| POST | `/syndication` | `syndication:manage` + originator/broker | No | Opens a syndication against an `OPEN` listing. One per listing (`422 ALREADY_SYNDICATED` otherwise). |
+| GET | `/syndication/:id` | `syndication:read` | — | |
+| POST | `/syndication/:id/allocations` | `syndication:allocate` + `CAPITAL_PROVIDER` | **No — proposal only** | Requires a live (non-withdrawn) `CapitalInterest` on the underlying listing (`422 NO_LIVE_INTEREST` otherwise). Enforces no duplicate capacity (`DUPLICATE_ALLOCATION`), no over-allocation (`OVER_ALLOCATION`), no exposure-limit breach (`EXPOSURE_LIMIT_EXCEEDED`) — all against the *proposed* total only. |
+| DELETE | `/syndication/:id/allocations` | `syndication:allocate` + `CAPITAL_PROVIDER` | No | Withdraws the caller's own proposal. Freely available while `OPEN`. |
+| GET | `/syndication/:id/allocations` | `syndication:read` | — | Current state |
+| GET | `/syndication/:id/events` | `syndication:read` | — | The complete, immutable history: every `PROPOSED`/`REMOVED`/`BOUND` event, forever, enforced append-only by a database trigger |
+| POST | `/syndication/:id/bind` | `syndication:manage` + originator/broker | **YES — THE BINDING CALL** | Requires proposals summing to exactly 100% (`422 INCOMPLETE_ALLOCATION` otherwise). Only the listing owner may call this — never a capital provider (`403`). After it returns: the syndication is `BOUND`, the listing is `MATCHED`, and a database trigger refuses any further mutation of this syndication's allocations, independent of application code. |
+
 ## Errors
 
 Domain invariant violations return `422` with a machine-readable code:
@@ -137,6 +152,9 @@ Codes: `INVALID_EDGE`, `DEPENDENCY_CYCLE`, `UNKNOWN_NODE`, `INVALID_PROVENANCE`,
 `AGENT_CHAIN_FORBIDDEN`, `UNKNOWN_NODE_TYPE`, `UNKNOWN_EDGE_TYPE`,
 `INVALID_SUBMISSION_TRANSITION`, `NOT_ASSESSED`, `APPROVAL_REQUIRED`,
 `STALE_APPROVAL`, `NOT_APPROVED`, `SUBMISSION_NOT_READY`, `ALREADY_LISTED`,
-`LISTING_NOT_OPEN`, `CURRENCY_MISMATCH`, `FORBIDDEN`
+`LISTING_NOT_OPEN`, `CURRENCY_MISMATCH`, `ALREADY_SYNDICATED`,
+`SYNDICATION_NOT_OPEN`, `NO_LIVE_INTEREST`, `INVALID_SHARE`,
+`DUPLICATE_ALLOCATION`, `OVER_ALLOCATION`, `EXPOSURE_LIMIT_EXCEEDED`,
+`ALLOCATION_NOT_FOUND`, `INCOMPLETE_ALLOCATION`, `FORBIDDEN`
 (403). Malformed or unknown request fields return `400`; unauthenticated `401`;
 missing scope or role `403`.

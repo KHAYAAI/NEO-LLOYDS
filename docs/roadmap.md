@@ -59,10 +59,24 @@ documentation, local deployment, passing tests.
 - See `docs/reports/phase-4.md` for the restart test: full workflow exercised,
   server killed and restarted, everything confirmed still present.
 
-## Phase 5 — Syndication
-Allocation across providers with hard invariants: total = 100%, no
-over-allocation, no duplicate capacity, no exposure-limit breach. Immutable
-allocation history.
+## Phase 5 — Syndication — **DELIVERED**
+
+- `proposeAllocation` / `removeAllocation`: pre-binding proposals, enforced
+  only against a prospective 100% ceiling. `bindAllocations`: the one pure
+  function where the crossing to a binding commitment happens, requiring an
+  exact 100% total and recomputing amounts with the same exact-sum money
+  split used everywhere else in the codebase (ADR-0005).
+- `SyndicationService.bind` persists that crossing atomically, flips the
+  syndication to BOUND, and marks the listing MATCHED. Two Postgres
+  triggers — one making the allocation history append-only forever, one
+  freezing `SyndicationAllocation` rows once BOUND — enforce the same
+  invariant independent of the application code.
+- Proposing an allocation requires a live `CapitalInterest` from Phase 4,
+  which is the concrete point that interest stops being purely displayed.
+- See `docs/reports/phase-5.md` for the exact line between non-binding and
+  binding, stated in code, and for the verification order used: the
+  database triggers were proven with raw SQL *before* any service code was
+  written against them.
 
 ## Phase 6 — Capital Ledger
 Committed / available / allocated / reserved / exposed / released capital,

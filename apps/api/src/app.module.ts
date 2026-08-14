@@ -20,6 +20,8 @@ import { UnderwritingController } from './underwriting/underwriting.controller.j
 import { UnderwritingService } from './underwriting/underwriting.service.js';
 import { MarketplaceController } from './marketplace/marketplace.controller.js';
 import { MarketplaceService } from './marketplace/marketplace.service.js';
+import { SyndicationController } from './syndication/syndication.controller.js';
+import { SyndicationService } from './syndication/syndication.service.js';
 import {
   AUDIT_REPOSITORY,
   CLOCK,
@@ -27,6 +29,7 @@ import {
   IDENTITY_REPOSITORY,
   MARKETPLACE_REPOSITORY,
   SUBMISSION_REPOSITORY,
+  SYNDICATION_REPOSITORY,
   UNDERWRITING_REPOSITORY,
 } from './persistence/ports.js';
 import {
@@ -36,6 +39,7 @@ import {
   PrismaMarketplaceRepository,
   PrismaService,
   PrismaSubmissionRepository,
+  PrismaSyndicationRepository,
   PrismaUnderwritingRepository,
 } from './persistence/prisma.repositories.js';
 import { SystemClock } from './persistence/in-memory.js';
@@ -50,6 +54,7 @@ const CONTROLLERS = [
   AnalystController,
   UnderwritingController,
   MarketplaceController,
+  SyndicationController,
 ];
 
 const SERVICES = [
@@ -60,11 +65,12 @@ const SERVICES = [
   AnalystService,
   UnderwritingService,
   MarketplaceService,
+  SyndicationService,
   AuditService,
 ];
 
 /**
- * Phase 1–4 composition. Persistence is injected through ports, so the test
+ * Phase 1–5 composition. Persistence is injected through ports, so the test
  * suite supplies in-memory adapters and everything above them is identical.
  */
 @Module({})
@@ -76,6 +82,7 @@ export class AppModule {
     submission: unknown;
     underwriting: unknown;
     marketplace: unknown;
+    syndication: unknown;
     clock: unknown;
     analystProvider?: unknown;
     extra?: unknown[];
@@ -91,6 +98,7 @@ export class AppModule {
         { provide: SUBMISSION_REPOSITORY, useValue: providers.submission },
         { provide: UNDERWRITING_REPOSITORY, useValue: providers.underwriting },
         { provide: MARKETPLACE_REPOSITORY, useValue: providers.marketplace },
+        { provide: SYNDICATION_REPOSITORY, useValue: providers.syndication },
         { provide: CLOCK, useValue: providers.clock },
         {
           provide: ANALYST_PROVIDER,
@@ -116,6 +124,7 @@ export class AppModule {
         { provide: SUBMISSION_REPOSITORY, useClass: PrismaSubmissionRepository },
         { provide: UNDERWRITING_REPOSITORY, useClass: PrismaUnderwritingRepository },
         { provide: MARKETPLACE_REPOSITORY, useClass: PrismaMarketplaceRepository },
+        { provide: SYNDICATION_REPOSITORY, useClass: PrismaSyndicationRepository },
         { provide: CLOCK, useClass: SystemClock },
         { provide: ANALYST_PROVIDER, useFactory: createAnalystProvider },
         { provide: APP_GUARD, useClass: ApiCredentialGuard },

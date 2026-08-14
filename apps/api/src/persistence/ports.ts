@@ -1,5 +1,6 @@
 import type {
   AgentMandate,
+  Allocation,
   AuditRecord,
   CapitalAppetite,
   MarketRole,
@@ -137,12 +138,74 @@ export interface MarketplaceRepository {
   withdrawInterest(listingId: string, organisationId: string, at: Date): Promise<void>;
 }
 
+export interface StoredSyndication {
+  id: string;
+  listingId: string;
+  organisationId: string;
+  capacity: Money;
+  status: 'OPEN' | 'BOUND' | 'CANCELLED';
+  createdAt: Date;
+  boundAt: Date | null;
+}
+
+export interface AllocationEvent {
+  id: string;
+  syndicationId: string;
+  organisationId: string;
+  action: 'PROPOSED' | 'REMOVED' | 'BOUND';
+  shareBps: number;
+  amount: Money;
+  actorSubjectId: string;
+  recordedAt: Date;
+}
+
+/**
+ * Syndication persistence. `bind` is the one method that both writes the
+ * final allocation amounts and flips the syndication to BOUND in the same
+ * call — implementations must do this atomically (a single transaction in
+ * the Prisma adapter), because a syndication that is BOUND with allocations
+ * not yet finalised is a state the domain never intends to exist.
+ */
+export interface SyndicationRepository {
+  create(input: {
+    id: string;
+    listingId: string;
+    organisationId: string;
+    capacity: Money;
+  }): Promise<StoredSyndication>;
+  find(id: string): Promise<StoredSyndication | undefined>;
+  findByListing(listingId: string): Promise<StoredSyndication | undefined>;
+
+  addAllocation(
+    syndicationId: string,
+    allocation: Allocation & { id: string },
+    actorSubjectId: string,
+  ): Promise<void>;
+  removeAllocation(
+    syndicationId: string,
+    organisationId: string,
+    actorSubjectId: string,
+  ): Promise<void>;
+  listAllocations(syndicationId: string): Promise<Allocation[]>;
+
+  /** Atomically: overwrite allocations with final amounts, mark BOUND, append BOUND events. */
+  bind(
+    syndicationId: string,
+    finalAllocations: readonly Allocation[],
+    actorSubjectId: string,
+    boundAt: Date,
+  ): Promise<StoredSyndication>;
+
+  listEvents(syndicationId: string): Promise<AllocationEvent[]>;
+}
+
 export const IDENTITY_REPOSITORY = Symbol('IDENTITY_REPOSITORY');
 export const AUDIT_REPOSITORY = Symbol('AUDIT_REPOSITORY');
 export const GRAPH_REPOSITORY = Symbol('GRAPH_REPOSITORY');
 export const SUBMISSION_REPOSITORY = Symbol('SUBMISSION_REPOSITORY');
 export const UNDERWRITING_REPOSITORY = Symbol('UNDERWRITING_REPOSITORY');
 export const MARKETPLACE_REPOSITORY = Symbol('MARKETPLACE_REPOSITORY');
+export const SYNDICATION_REPOSITORY = Symbol('SYNDICATION_REPOSITORY');
 export const CLOCK = Symbol('CLOCK');
 
 export interface Clock {

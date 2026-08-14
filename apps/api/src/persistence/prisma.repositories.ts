@@ -3,10 +3,13 @@ import { PrismaClient } from '@prisma/client';
 import {
   money,
   provenance,
+  DomainError,
   type AgentMandate,
+  type Allocation,
   type AuditRecord,
   type CapitalAppetite,
   type MarketRole,
+  type Money,
   type Organisation,
   type RiskEdge,
   type RiskNode,
@@ -16,6 +19,7 @@ import {
   type UnderwritingAssessment,
 } from '@neo-lloyds/domain';
 import type {
+  AllocationEvent,
   AuditRepository,
   GraphRepository,
   IdentityRepository,
@@ -23,7 +27,9 @@ import type {
   StoredCredential,
   StoredInterest,
   StoredListing,
+  StoredSyndication,
   SubmissionRepository,
+  SyndicationRepository,
   UnderwritingRepository,
 } from './ports.js';
 
@@ -738,5 +744,208 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       where: { listingId_organisationId: { listingId, organisationId } },
       data: { withdrawnAt: at },
     });
+  }
+}
+
+@Injectable()
+export class PrismaSyndicationRepository implements SyndicationRepository {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private toDomain(row: {
+    id: string;
+    listingId: string;
+    organisationId: string;
+    capacityMinor: bigint;
+    currency: string;
+    status: string;
+    createdAt: Date;
+    boundAt: Date | null;
+  }): StoredSyndication {
+    return {
+      id: row.id,
+      listingId: row.listingId,
+      organisationId: row.organisationId,
+      capacity: money(Number(row.capacityMinor), row.currency),
+      status: row.status as StoredSyndication['status'],
+      createdAt: row.createdAt,
+      boundAt: row.boundAt,
+    };
+  }
+
+  async create(input: {
+    id: string;
+    listingId: string;
+    organisationId: string;
+    capacity: Money;
+  }): Promise<StoredSyndication> {
+    const row = await this.prisma.syndication.create({
+      data: {
+        id: input.id,
+        listingId: input.listingId,
+        organisationId: input.organisationId,
+        capacityMinor: BigInt(input.capacity.amountMinor),
+        currency: input.capacity.currency,
+      },
+    });
+    return this.toDomain(row);
+  }
+
+  async find(id: string): Promise<StoredSyndication | undefined> {
+    const row = await this.prisma.syndication.findUnique({ where: { id } });
+    return row ? this.toDomain(row) : undefined;
+  }
+
+  async findByListing(listingId: string): Promise<StoredSyndication | undefined> {
+    const row = await this.prisma.syndication.findUnique({ where: { listingId } });
+    return row ? this.toDomain(row) : undefined;
+  }
+
+  /**
+   * Guards against mutating a non-OPEN syndication at the application layer,
+   * in addition to (not instead of) the database triggers that freeze
+   * `SyndicationAllocation` rows once BOUND — belt and braces on the one
+   * invariant in this codebase where "the code was buggy" must never be an
+   * excuse for an altered commitment.
+   */
+  private async requireOpen(syndicationId: string): Promise<void> {
+    const syndication = await this.prisma.syndication.findUniqueOrThrow({
+      where: { id: syndicationId },
+    });
+    if (syndication.status !== 'OPEN') {
+      throw new DomainError('Cannot mutate allocations on a non-OPEN syndication', 'SYNDICATION_NOT_OPEN', {
+        syndicationId,
+        status: syndication.status,
+      });
+    }
+  }
+
+  async addAllocation(
+    syndicationId: string,
+    allocation: Allocation & { id: string },
+    actorSubjectId: string,
+  ): Promise<void> {
+    await this.requireOpen(syndicationId);
+    await this.prisma.$transaction([
+      this.prisma.syndicationAllocation.create({
+        data: {
+          id: allocation.id,
+          syndicationId,
+          organisationId: allocation.organisationId,
+          shareBps: allocation.shareBps,
+          amountMinor: BigInt(allocation.amount.amountMinor),
+          currency: allocation.amount.currency,
+        },
+      }),
+      this.prisma.syndicationAllocationEvent.create({
+        data: {
+          id: `${allocation.id}-proposed`,
+          syndicationId,
+          organisationId: allocation.organisationId,
+          action: 'PROPOSED',
+          shareBps: allocation.shareBps,
+          amountMinor: BigInt(allocation.amount.amountMinor),
+          currency: allocation.amount.currency,
+          actorSubjectId,
+        },
+      }),
+    ]);
+  }
+
+  async removeAllocation(
+    syndicationId: string,
+    organisationId: string,
+    actorSubjectId: string,
+  ): Promise<void> {
+    await this.requireOpen(syndicationId);
+    const existing = await this.prisma.syndicationAllocation.findUnique({
+      where: { syndicationId_organisationId: { syndicationId, organisationId } },
+    });
+    if (!existing) return;
+
+    await this.prisma.$transaction([
+      this.prisma.syndicationAllocationEvent.create({
+        data: {
+          id: `${existing.id}-removed-${Date.now()}`,
+          syndicationId,
+          organisationId,
+          action: 'REMOVED',
+          shareBps: existing.shareBps,
+          amountMinor: existing.amountMinor,
+          currency: existing.currency,
+          actorSubjectId,
+        },
+      }),
+      this.prisma.syndicationAllocation.delete({ where: { id: existing.id } }),
+    ]);
+  }
+
+  async listAllocations(syndicationId: string): Promise<Allocation[]> {
+    const rows = await this.prisma.syndicationAllocation.findMany({ where: { syndicationId } });
+    return rows.map((row) => ({
+      organisationId: row.organisationId,
+      shareBps: row.shareBps,
+      amount: money(Number(row.amountMinor), row.currency),
+    }));
+  }
+
+  async bind(
+    syndicationId: string,
+    finalAllocations: readonly Allocation[],
+    actorSubjectId: string,
+    boundAt: Date,
+  ): Promise<StoredSyndication> {
+    const existing = await this.prisma.syndicationAllocation.findMany({ where: { syndicationId } });
+    const idByOrg = new Map(existing.map((row) => [row.organisationId, row.id]));
+
+    // Order matters: allocation amounts are finalised while the syndication
+    // is still OPEN (so the freeze trigger does not block these updates),
+    // and only then does the status flip to BOUND within the same
+    // transaction — the two are atomic from any external observer's view.
+    await this.prisma.$transaction([
+      ...finalAllocations.map((allocation) =>
+        this.prisma.syndicationAllocation.update({
+          where: { id: idByOrg.get(allocation.organisationId) },
+          data: { amountMinor: BigInt(allocation.amount.amountMinor) },
+        }),
+      ),
+      this.prisma.syndication.update({
+        where: { id: syndicationId },
+        data: { status: 'BOUND', boundAt },
+      }),
+      ...finalAllocations.map((allocation) =>
+        this.prisma.syndicationAllocationEvent.create({
+          data: {
+            id: `${syndicationId}-${allocation.organisationId}-bound`,
+            syndicationId,
+            organisationId: allocation.organisationId,
+            action: 'BOUND',
+            shareBps: allocation.shareBps,
+            amountMinor: BigInt(allocation.amount.amountMinor),
+            currency: allocation.amount.currency,
+            actorSubjectId,
+          },
+        }),
+      ),
+    ]);
+
+    const row = await this.prisma.syndication.findUniqueOrThrow({ where: { id: syndicationId } });
+    return this.toDomain(row);
+  }
+
+  async listEvents(syndicationId: string): Promise<AllocationEvent[]> {
+    const rows = await this.prisma.syndicationAllocationEvent.findMany({
+      where: { syndicationId },
+      orderBy: { recordedAt: 'asc' },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      syndicationId: row.syndicationId,
+      organisationId: row.organisationId,
+      action: row.action as AllocationEvent['action'],
+      shareBps: row.shareBps,
+      amount: money(Number(row.amountMinor), row.currency),
+      actorSubjectId: row.actorSubjectId,
+      recordedAt: row.recordedAt,
+    }));
   }
 }

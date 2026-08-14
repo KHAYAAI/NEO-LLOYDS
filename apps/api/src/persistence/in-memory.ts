@@ -1,17 +1,21 @@
-import type {
-  AgentMandate,
-  AuditRecord,
-  CapitalAppetite,
-  MarketRole,
-  Organisation,
-  RiskEdge,
-  RiskNode,
-  RiskSubmission,
-  SubmissionStatus,
-  UnderwritingApproval,
-  UnderwritingAssessment,
+import {
+  DomainError,
+  type Allocation,
+  type AgentMandate,
+  type AuditRecord,
+  type CapitalAppetite,
+  type MarketRole,
+  type Money,
+  type Organisation,
+  type RiskEdge,
+  type RiskNode,
+  type RiskSubmission,
+  type SubmissionStatus,
+  type UnderwritingApproval,
+  type UnderwritingAssessment,
 } from '@neo-lloyds/domain';
 import type {
+  AllocationEvent,
   AuditRepository,
   Clock,
   GraphRepository,
@@ -20,7 +24,9 @@ import type {
   StoredCredential,
   StoredInterest,
   StoredListing,
+  StoredSyndication,
   SubmissionRepository,
+  SyndicationRepository,
   UnderwritingRepository,
 } from './ports.js';
 
@@ -290,6 +296,143 @@ export class InMemoryMarketplaceRepository implements MarketplaceRepository {
       i.organisationId === organisationId ? { ...i, withdrawnAt: at } : i,
     );
     this.interests.set(listingId, updated);
+  }
+}
+
+export class InMemorySyndicationRepository implements SyndicationRepository {
+  private readonly syndications = new Map<string, StoredSyndication>();
+  private readonly allocations = new Map<string, (Allocation & { id: string })[]>();
+  private readonly events = new Map<string, AllocationEvent[]>();
+
+  async create(input: {
+    id: string;
+    listingId: string;
+    organisationId: string;
+    capacity: Money;
+  }): Promise<StoredSyndication> {
+    const syndication: StoredSyndication = {
+      id: input.id,
+      listingId: input.listingId,
+      organisationId: input.organisationId,
+      capacity: input.capacity,
+      status: 'OPEN',
+      createdAt: new Date(),
+      boundAt: null,
+    };
+    this.syndications.set(syndication.id, syndication);
+    this.allocations.set(syndication.id, []);
+    this.events.set(syndication.id, []);
+    return syndication;
+  }
+
+  async find(id: string): Promise<StoredSyndication | undefined> {
+    return this.syndications.get(id);
+  }
+
+  async findByListing(listingId: string): Promise<StoredSyndication | undefined> {
+    return [...this.syndications.values()].find((s) => s.listingId === listingId);
+  }
+
+  async addAllocation(
+    syndicationId: string,
+    allocation: Allocation & { id: string },
+    actorSubjectId: string,
+  ): Promise<void> {
+    const syndication = this.syndications.get(syndicationId);
+    if (syndication?.status !== 'OPEN') {
+      throw new DomainError('Cannot mutate allocations on a non-OPEN syndication', 'SYNDICATION_NOT_OPEN', {
+        syndicationId,
+      });
+    }
+    const list = this.allocations.get(syndicationId) ?? [];
+    this.allocations.set(syndicationId, [...list, allocation]);
+    this.appendEvent(syndicationId, {
+      id: `${allocation.id}-proposed`,
+      syndicationId,
+      organisationId: allocation.organisationId,
+      action: 'PROPOSED',
+      shareBps: allocation.shareBps,
+      amount: allocation.amount,
+      actorSubjectId,
+      recordedAt: new Date(),
+    });
+  }
+
+  async removeAllocation(
+    syndicationId: string,
+    organisationId: string,
+    actorSubjectId: string,
+  ): Promise<void> {
+    const syndication = this.syndications.get(syndicationId);
+    if (syndication?.status !== 'OPEN') {
+      throw new DomainError('Cannot mutate allocations on a non-OPEN syndication', 'SYNDICATION_NOT_OPEN', {
+        syndicationId,
+      });
+    }
+    const list = this.allocations.get(syndicationId) ?? [];
+    const removed = list.find((a) => a.organisationId === organisationId);
+    this.allocations.set(
+      syndicationId,
+      list.filter((a) => a.organisationId !== organisationId),
+    );
+    if (removed) {
+      this.appendEvent(syndicationId, {
+        id: `${removed.id}-removed-${Date.now()}`,
+        syndicationId,
+        organisationId,
+        action: 'REMOVED',
+        shareBps: removed.shareBps,
+        amount: removed.amount,
+        actorSubjectId,
+        recordedAt: new Date(),
+      });
+    }
+  }
+
+  async listAllocations(syndicationId: string): Promise<Allocation[]> {
+    return this.allocations.get(syndicationId) ?? [];
+  }
+
+  async bind(
+    syndicationId: string,
+    finalAllocations: readonly Allocation[],
+    actorSubjectId: string,
+    boundAt: Date,
+  ): Promise<StoredSyndication> {
+    const syndication = this.syndications.get(syndicationId);
+    if (!syndication) throw new DomainError('Syndication not found', 'NOT_FOUND', { syndicationId });
+
+    const withIds = finalAllocations.map((a, i) => ({
+      ...a,
+      id: this.allocations.get(syndicationId)?.[i]?.id ?? `${syndicationId}-final-${i}`,
+    }));
+    this.allocations.set(syndicationId, withIds);
+
+    for (const allocation of finalAllocations) {
+      this.appendEvent(syndicationId, {
+        id: `${syndicationId}-${allocation.organisationId}-bound`,
+        syndicationId,
+        organisationId: allocation.organisationId,
+        action: 'BOUND',
+        shareBps: allocation.shareBps,
+        amount: allocation.amount,
+        actorSubjectId,
+        recordedAt: boundAt,
+      });
+    }
+
+    const bound: StoredSyndication = { ...syndication, status: 'BOUND', boundAt };
+    this.syndications.set(syndicationId, bound);
+    return bound;
+  }
+
+  async listEvents(syndicationId: string): Promise<AllocationEvent[]> {
+    return this.events.get(syndicationId) ?? [];
+  }
+
+  private appendEvent(syndicationId: string, event: AllocationEvent): void {
+    const list = this.events.get(syndicationId) ?? [];
+    this.events.set(syndicationId, [...list, event]);
   }
 }
 

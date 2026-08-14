@@ -68,6 +68,8 @@ model Organisation {
   listings              MarketListing[]
   capitalAppetite        CapitalAppetiteProfile?
   capitalInterests       CapitalInterest[]
+  syndications           Syndication[]
+  syndicationAllocations SyndicationAllocation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -378,7 +380,8 @@ model MarketListing {
   listedAt       DateTime      @default(now())
   closedAt       DateTime?
 
-  interests CapitalInterest[]
+  interests   CapitalInterest[]
+  syndication Syndication?
 
   @@index([organisationId, status])
   @@index([riskClass, jurisdiction, status])
@@ -421,4 +424,70 @@ model CapitalInterest {
   @@unique([listingId, organisationId])
   @@index([listingId])
   @@index([organisationId])
+}
+
+// ---------------------------------------------------------- syndication
+
+/// A syndication divides one listing's capacity across capital providers
+/// (brief §9). Proposed allocations remain freely add/removable while OPEN;
+/// binding (packages/domain/src/syndication.ts: bindAllocations) is the one
+/// crossing from non-binding interest to committed capital, and once BOUND
+/// no allocation for this syndication may be mutated — enforced both in the
+/// service layer and by a database trigger below.
+model Syndication {
+  id             String   @id @default(uuid())
+  listingId      String   @unique
+  listing        MarketListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id])
+  capacityMinor  BigInt
+  currency       String   @db.Char(3)
+  /// OPEN | BOUND | CANCELLED
+  status         String   @default("OPEN")
+  createdAt      DateTime @default(now())
+  boundAt        DateTime?
+
+  allocations SyndicationAllocation[]
+  events      SyndicationAllocationEvent[]
+
+  @@index([organisationId, status])
+}
+
+/// Current proposal state. Freely mutable while the parent syndication is
+/// OPEN; a trigger refuses UPDATE/DELETE once it is BOUND, so the binding
+/// commitment cannot be altered even by direct database access.
+model SyndicationAllocation {
+  id             String      @id @default(uuid())
+  syndicationId  String
+  syndication    Syndication @relation(fields: [syndicationId], references: [id], onDelete: Cascade)
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  shareBps       Int
+  amountMinor    BigInt
+  currency       String      @db.Char(3)
+  createdAt      DateTime    @default(now())
+
+  @@unique([syndicationId, organisationId])
+  @@index([syndicationId])
+}
+
+/// Append-only, forever — enforced by trigger, same pattern as AuditRecord.
+/// Every propose/remove/bind action is recorded here and never removed, even
+/// after the corresponding SyndicationAllocation row is deleted (on
+/// withdrawal) or frozen (on binding). This is the "immutable allocation
+/// history" the brief requires.
+model SyndicationAllocationEvent {
+  id             String      @id @default(uuid())
+  syndicationId  String
+  syndication    Syndication @relation(fields: [syndicationId], references: [id], onDelete: Cascade)
+  organisationId String
+  /// PROPOSED | REMOVED | BOUND
+  action         String
+  shareBps       Int
+  amountMinor    BigInt
+  currency       String      @db.Char(3)
+  actorSubjectId String
+  recordedAt     DateTime    @default(now())
+
+  @@index([syndicationId, recordedAt])
 }

@@ -13,6 +13,7 @@ import {
   InMemoryIdentityRepository,
   InMemoryMarketplaceRepository,
   InMemorySubmissionRepository,
+  InMemorySyndicationRepository,
   InMemoryUnderwritingRepository,
   SystemClock,
 } from '../src/persistence/in-memory.js';
@@ -24,6 +25,7 @@ const graphRepo = new InMemoryGraphRepository();
 const submissionRepo = new InMemorySubmissionRepository();
 const underwritingRepo = new InMemoryUnderwritingRepository();
 const marketplaceRepo = new InMemoryMarketplaceRepository();
+const syndicationRepo = new InMemorySyndicationRepository();
 
 let app: INestApplication;
 let http: string;
@@ -71,6 +73,7 @@ beforeAll(async () => {
         submission: submissionRepo,
         underwriting: underwritingRepo,
         marketplace: marketplaceRepo,
+        syndication: syndicationRepo,
         clock: new SystemClock(),
       }),
     ],
@@ -797,5 +800,208 @@ describe('Phase 4: marketplace', () => {
 
     const browsed = await authed().get('/marketplace/listings?riskClass=UNIQUE_CLASS_XYZ').expect(200);
     expect(browsed.body.listings).toHaveLength(0);
+  });
+});
+
+describe('Phase 5: syndication', () => {
+  async function openListing(riskLabel: string, capacityMinor = 10_000) {
+    const risk = await createNode('RISK', riskLabel);
+    const submission = await authed()
+      .post('/submissions')
+      .send({ riskId: risk, title: riskLabel })
+      .then((r) => r.body.submission);
+
+    await authed().post(`/underwriting/risks/${risk}/assess`).send({
+      factors: [
+        { key: 'f1', description: 'd', weight: 1, likelihood: 0.01, confidence: 0.95, basis: 'STATISTICAL_MODEL' },
+      ],
+      maximumEstimatedLossMinor: 10000,
+      currency: 'USD',
+      durationDays: 30,
+      mitigationCoverage: 0,
+      correlatedRiskCount: 0,
+      concentrationShare: 0,
+    });
+    for (const to of ['SUBMITTED', 'ANALYSING', 'SCORED', 'READY_FOR_UNDERWRITING']) {
+      await authed().post(`/submissions/${submission.id}/advance`).send({ to });
+    }
+
+    const listing = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: submission.id, riskClass: 'SYNDICATION_TEST', capacityMinor, currency: 'USD', durationDays: 30 })
+      .then((r) => r.body.listing);
+
+    return listing.id as string;
+  }
+
+  async function capitalProvider(name: string, listingId: string, indicativeAmountMinor = 1000) {
+    const provider = await bootstrapOrganisation(name, ['*'], ['CAPITAL_PROVIDER']);
+    const authedAs = () => ({
+      get: (url: string) => request(http).get(url).set('Authorization', `Bearer ${provider.token}`),
+      post: (url: string) => request(http).post(url).set('Authorization', `Bearer ${provider.token}`),
+      delete: (url: string) => request(http).delete(url).set('Authorization', `Bearer ${provider.token}`),
+    });
+    await authedAs()
+      .post(`/marketplace/listings/${listingId}/interest`)
+      .send({ indicativeAmountMinor, currency: 'USD' })
+      .expect(201);
+    return { ...provider, authedAs };
+  }
+
+  it('opens exactly one syndication per listing', async () => {
+    const listingId = await openListing('synd-single-open');
+    await authed().post('/syndication').send({ listingId }).expect(201);
+
+    const dup = await authed().post('/syndication').send({ listingId });
+    expect(dup.status).toBe(422);
+    expect(dup.body.error.code).toBe('ALREADY_SYNDICATED');
+  });
+
+  it('requires a live expression of interest before a provider may propose', async () => {
+    const listingId = await openListing('synd-no-interest');
+    const syndication = await authed().post('/syndication').send({ listingId }).then((r) => r.body.syndication);
+
+    const outsider = await bootstrapOrganisation('No Interest Provider', ['*'], ['CAPITAL_PROVIDER']);
+    const response = await request(http)
+      .post(`/syndication/${syndication.id}/allocations`)
+      .set('Authorization', `Bearer ${outsider.token}`)
+      .send({ shareBps: 5000 });
+    expect(response.status).toBe(422);
+    expect(response.body.error.code).toBe('NO_LIVE_INTEREST');
+  });
+
+  it('rejects duplicate capacity: the same provider proposing twice', async () => {
+    const listingId = await openListing('synd-duplicate');
+    const syndication = await authed().post('/syndication').send({ listingId }).then((r) => r.body.syndication);
+    const provider = await capitalProvider('Dup Provider', listingId);
+
+    await provider.authedAs().post(`/syndication/${syndication.id}/allocations`).send({ shareBps: 3000 }).expect(201);
+    const dup = await provider.authedAs().post(`/syndication/${syndication.id}/allocations`).send({ shareBps: 2000 });
+    expect(dup.status).toBe(422);
+    expect(dup.body.error.code).toBe('DUPLICATE_ALLOCATION');
+  });
+
+  it('rejects over-allocation: proposals that would push the total past 100%', async () => {
+    const listingId = await openListing('synd-over-allocate');
+    const syndication = await authed().post('/syndication').send({ listingId }).then((r) => r.body.syndication);
+    const a = await capitalProvider('Over Alloc A', listingId);
+    const b = await capitalProvider('Over Alloc B', listingId);
+
+    await a.authedAs().post(`/syndication/${syndication.id}/allocations`).send({ shareBps: 7000 }).expect(201);
+    const over = await b.authedAs().post(`/syndication/${syndication.id}/allocations`).send({ shareBps: 4000 });
+    expect(over.status).toBe(422);
+    expect(over.body.error.code).toBe('OVER_ALLOCATION');
+  });
+
+  it('rejects an allocation that would exceed the provider\'s declared exposure limit', async () => {
+    const listingId = await openListing('synd-exposure-limit', 1_000_000_00);
+    const syndication = await authed().post('/syndication').send({ listingId }).then((r) => r.body.syndication);
+    const provider = await capitalProvider('Exposure Limited Provider', listingId, 100_00);
+
+    await provider.authedAs().post('/marketplace/appetite').send({
+      preferredRiskClasses: [],
+      maxExposureMinor: 100_00, // $100 max exposure
+      currency: 'USD',
+      preferredJurisdictions: [],
+      minimumReturnBps: 100,
+      maxDurationDays: 60,
+      riskTolerance: 'CONSERVATIVE',
+      concentrationLimitBps: 10_000,
+    }).expect(201);
+
+    // 50% of $1,000,000 capacity is $500,000 — far above the $100 limit.
+    const response = await provider.authedAs().post(`/syndication/${syndication.id}/allocations`).send({ shareBps: 5000 });
+    expect(response.status).toBe(422);
+    expect(response.body.error.code).toBe('EXPOSURE_LIMIT_EXCEEDED');
+  });
+
+  it('refuses to bind an incomplete syndication, and only the listing owner may bind', async () => {
+    const listingId = await openListing('synd-incomplete-bind');
+    const syndication = await authed().post('/syndication').send({ listingId }).then((r) => r.body.syndication);
+    const provider = await capitalProvider('Incomplete Bind Provider', listingId);
+    await provider.authedAs().post(`/syndication/${syndication.id}/allocations`).send({ shareBps: 5000 }).expect(201);
+
+    const incomplete = await authed().post(`/syndication/${syndication.id}/bind`);
+    expect(incomplete.status).toBe(422);
+    expect(incomplete.body.error.code).toBe('INCOMPLETE_ALLOCATION');
+
+    const wrongCaller = await provider.authedAs().post(`/syndication/${syndication.id}/bind`);
+    expect(wrongCaller.status).toBe(403);
+  });
+
+  it('binds at exactly 100%, sums exactly to capacity, and freezes the syndication', async () => {
+    const listingId = await openListing('synd-full-bind', 100_000); // deliberately awkward for a 3-way split
+    const syndication = await authed().post('/syndication').send({ listingId }).then((r) => r.body.syndication);
+
+    const a = await capitalProvider('Bind Provider A', listingId);
+    const b = await capitalProvider('Bind Provider B', listingId);
+    const c = await capitalProvider('Bind Provider C', listingId);
+    await a.authedAs().post(`/syndication/${syndication.id}/allocations`).send({ shareBps: 3334 }).expect(201);
+    await b.authedAs().post(`/syndication/${syndication.id}/allocations`).send({ shareBps: 3333 }).expect(201);
+    await c.authedAs().post(`/syndication/${syndication.id}/allocations`).send({ shareBps: 3333 }).expect(201);
+
+    const bound = await authed().post(`/syndication/${syndication.id}/bind`).expect(201);
+    expect(bound.body.syndication.status).toBe('BOUND');
+
+    const allocations = await authed().get(`/syndication/${syndication.id}/allocations`).expect(200);
+    const sum = allocations.body.allocations.reduce(
+      (acc: number, a: { amount: { amountMinor: number } }) => acc + a.amount.amountMinor,
+      0,
+    );
+    expect(sum).toBe(100_000);
+
+    // The underlying listing is now MATCHED, not OPEN.
+    const listing = await authed().get(`/marketplace/listings/${listingId}`).expect(200);
+    expect(listing.body.listing.status).toBe('MATCHED');
+
+    // Once bound, no further proposal, withdrawal, or duplicate bind is
+    // possible. (The listing is MATCHED now, so a new provider cannot even
+    // express interest — the marketplace layer blocks it before syndication
+    // would; that is itself a correct downstream effect of binding.)
+    const d = await bootstrapOrganisation('Bind Provider D', ['*'], ['CAPITAL_PROVIDER']);
+    const interestAfterMatch = await request(http)
+      .post(`/marketplace/listings/${listingId}/interest`)
+      .set('Authorization', `Bearer ${d.token}`)
+      .send({ indicativeAmountMinor: 1, currency: 'USD' });
+    expect(interestAfterMatch.status).toBe(422);
+    expect(interestAfterMatch.body.error.code).toBe('LISTING_NOT_OPEN');
+
+    const afterBind = await request(http)
+      .post(`/syndication/${syndication.id}/allocations`)
+      .set('Authorization', `Bearer ${d.token}`)
+      .send({ shareBps: 1 });
+    expect(afterBind.status).toBe(422);
+    expect(afterBind.body.error.code).toBe('SYNDICATION_NOT_OPEN');
+
+    const rebind = await authed().post(`/syndication/${syndication.id}/bind`);
+    expect(rebind.status).toBe(422);
+    expect(rebind.body.error.code).toBe('SYNDICATION_NOT_OPEN');
+
+    // The full history remains, including every propose event, and is
+    // ordered and complete — this is the immutable allocation history.
+    const events = await authed().get(`/syndication/${syndication.id}/events`).expect(200);
+    const actions = events.body.events.map((e: { action: string }) => e.action);
+    expect(actions.filter((a: string) => a === 'PROPOSED')).toHaveLength(3);
+    expect(actions.filter((a: string) => a === 'BOUND')).toHaveLength(3);
+  });
+
+  it('allows freely withdrawing and reproposing before binding', async () => {
+    const listingId = await openListing('synd-withdraw-repropose');
+    const syndication = await authed().post('/syndication').send({ listingId }).then((r) => r.body.syndication);
+    const provider = await capitalProvider('Withdraw Provider', listingId);
+
+    await provider.authedAs().post(`/syndication/${syndication.id}/allocations`).send({ shareBps: 4000 }).expect(201);
+    await provider.authedAs().delete(`/syndication/${syndication.id}/allocations`).expect(200);
+
+    const allocations = await authed().get(`/syndication/${syndication.id}/allocations`).expect(200);
+    expect(allocations.body.allocations).toHaveLength(0);
+
+    // Freed capacity can be reproposed without a duplicate-allocation error.
+    await provider.authedAs().post(`/syndication/${syndication.id}/allocations`).send({ shareBps: 4000 }).expect(201);
+
+    // The withdrawal is preserved in history even though the live row is gone.
+    const events = await authed().get(`/syndication/${syndication.id}/events`).expect(200);
+    const actions = events.body.events.map((e: { action: string }) => e.action);
+    expect(actions).toContain('REMOVED');
   });
 });
