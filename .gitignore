@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.next/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+.DS_Store
+
+# Stray emit from typechecking
+apps/*/test/*.js
+apps/*/test/*.d.ts
+apps/*/test/*.map

@@ -1,0 +1,260 @@
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import {
+  DomainError,
+  MARKET_ROLES,
+  type AuthContext,
+  type MarketRole,
+  type Organisation,
+} from '@neo-lloyds/domain';
+import {
+  IDENTITY_REPOSITORY,
+  type IdentityRepository,
+} from '../persistence/ports.js';
+import { AuditService } from '../common/audit.service.js';
+import { generateCredential, hashSecret } from '../common/auth.js';
+
+const JURISDICTION = /^[A-Z]{2}$/;
+
+@Injectable()
+export class IdentityService {
+  constructor(
+    @Inject(IDENTITY_REPOSITORY) private readonly repository: IdentityRepository,
+    @Inject(AuditService) private readonly audit: AuditService,
+  ) {}
+
+  async createOrganisation(
+    ctx: AuthContext,
+    input: {
+      legalName: string;
+      kind: Organisation['kind'];
+      jurisdiction: string;
+      principalOrganisationId?: string;
+    },
+  ): Promise<Organisation> {
+    if (!JURISDICTION.test(input.jurisdiction)) {
+      throw new DomainError(
+        'jurisdiction must be an ISO-3166-1 alpha-2 code; there is no default (ADR-0004)',
+        'INVALID_JURISDICTION',
+        { jurisdiction: input.jurisdiction },
+      );
+    }
+
+    // An autonomous agent is never a principal in its own right: legal
+    // responsibility rests with a real organisation (domain-model.md §1).
+    if (input.kind === 'AI_AGENT') {
+      if (!input.principalOrganisationId) {
+        throw new DomainError(
+          'An AI_AGENT organisation requires a principalOrganisationId',
+          'AGENT_REQUIRES_PRINCIPAL',
+        );
+      }
+      const principal = await this.repository.findOrganisation(
+        input.principalOrganisationId,
+      );
+      if (!principal) {
+        throw new DomainError('Principal organisation does not exist', 'UNKNOWN_PRINCIPAL', {
+          principalOrganisationId: input.principalOrganisationId,
+        });
+      }
+      if (principal.kind === 'AI_AGENT') {
+        throw new DomainError(
+          'An agent may not be the principal of another agent',
+          'AGENT_CHAIN_FORBIDDEN',
+        );
+      }
+    }
+
+    const organisation = await this.repository.createOrganisation({
+      id: randomUUID(),
+      ...input,
+    });
+
+    await this.audit.record({
+      ctx,
+      action: 'identity.organisation.create',
+      subjectType: 'Organisation',
+      subjectId: organisation.id,
+      decision: 'ALLOWED',
+      reason: 'Organisation registered',
+      after: organisation,
+    });
+
+    return organisation;
+  }
+
+  async grantRole(
+    ctx: AuthContext,
+    organisationId: string,
+    role: MarketRole,
+  ): Promise<Organisation> {
+    if (!MARKET_ROLES.includes(role)) {
+      throw new DomainError('Unknown market role', 'UNKNOWN_ROLE', { role });
+    }
+
+    const before = await this.repository.findOrganisation(organisationId);
+    if (!before) throw new NotFoundException('Organisation not found');
+
+    const after = await this.repository.grantRole(organisationId, role, ctx.subjectId);
+
+    await this.audit.record({
+      ctx,
+      action: 'identity.role.grant',
+      subjectType: 'Organisation',
+      subjectId: organisationId,
+      decision: 'ALLOWED',
+      reason: `Granted market role ${role}`,
+      before,
+      after,
+    });
+
+    return after;
+  }
+
+  async setKybStatus(
+    ctx: AuthContext,
+    organisationId: string,
+    status: Organisation['kybStatus'],
+  ): Promise<Organisation> {
+    const before = await this.repository.findOrganisation(organisationId);
+    if (!before) throw new NotFoundException('Organisation not found');
+
+    const after = await this.repository.setKybStatus(organisationId, status);
+
+    await this.audit.record({
+      ctx,
+      action: 'identity.kyb.update',
+      subjectType: 'Organisation',
+      subjectId: organisationId,
+      decision: 'ALLOWED',
+      reason: `KYB status set to ${status}`,
+      before,
+      after,
+      policy: 'KYB_MANUAL_REVIEW',
+    });
+
+    return after;
+  }
+
+  /**
+   * Issues a credential. The plaintext secret is returned exactly once and is
+   * never recoverable afterwards — only a salted hash is stored.
+   */
+  async issueCredential(
+    ctx: AuthContext,
+    input: {
+      organisationId: string;
+      label: string;
+      scopes: string[];
+      subjectKind?: 'USER' | 'SERVICE' | 'AGENT';
+      expiresAt?: string;
+    },
+  ): Promise<{ keyId: string; secret: string; scopes: string[] }> {
+    const organisation = await this.repository.findOrganisation(input.organisationId);
+    if (!organisation) throw new NotFoundException('Organisation not found');
+
+    const { keyId, secret, salt } = generateCredential();
+
+    await this.repository.createCredential({
+      id: randomUUID(),
+      keyId,
+      secretHash: hashSecret(secret, salt),
+      secretSalt: salt,
+      organisationId: input.organisationId,
+      label: input.label,
+      scopes: input.scopes,
+      subjectKind: input.subjectKind ?? 'SERVICE',
+      expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+    });
+
+    await this.audit.record({
+      ctx,
+      action: 'identity.credential.issue',
+      subjectType: 'ApiCredential',
+      subjectId: keyId,
+      decision: 'ALLOWED',
+      reason: `Credential issued: ${input.label}`,
+      // The secret is deliberately absent from the audit record.
+      after: { keyId, scopes: input.scopes, organisationId: input.organisationId },
+    });
+
+    return { keyId, secret, scopes: input.scopes };
+  }
+
+  async revokeCredential(ctx: AuthContext, keyId: string): Promise<void> {
+    const credential = await this.repository.findCredentialByKeyId(keyId);
+    if (!credential) throw new NotFoundException('Credential not found');
+
+    await this.repository.revokeCredential(keyId);
+    await this.audit.record({
+      ctx,
+      action: 'identity.credential.revoke',
+      subjectType: 'ApiCredential',
+      subjectId: keyId,
+      decision: 'ALLOWED',
+      reason: 'Credential revoked',
+    });
+  }
+
+  async createMandate(
+    ctx: AuthContext,
+    input: {
+      agentOrganisationId: string;
+      permittedActions: string[];
+      maxTransactionValueMinor: number;
+      currency: string;
+      expiresAt: string;
+    },
+  ) {
+    const agent = await this.repository.findOrganisation(input.agentOrganisationId);
+    if (!agent) throw new NotFoundException('Agent organisation not found');
+    if (agent.kind !== 'AI_AGENT' || !agent.principalOrganisationId) {
+      throw new DomainError(
+        'Mandates may only be granted to an AI_AGENT organisation with a principal',
+        'NOT_AN_AGENT',
+        { organisationId: agent.id },
+      );
+    }
+    // Only the principal may widen or narrow its agent's authority.
+    if (ctx.organisationId !== agent.principalOrganisationId) {
+      throw new DomainError(
+        'Only the principal organisation may issue a mandate to its agent',
+        'FORBIDDEN',
+        { principalOrganisationId: agent.principalOrganisationId },
+      );
+    }
+
+    const mandate = await this.repository.createMandate({
+      id: randomUUID(),
+      agentOrganisationId: agent.id,
+      principalOrganisationId: agent.principalOrganisationId,
+      permittedActions: input.permittedActions,
+      maxTransactionValueMinor: input.maxTransactionValueMinor,
+      currency: input.currency,
+      expiresAt: input.expiresAt,
+    });
+
+    await this.audit.record({
+      ctx,
+      action: 'identity.mandate.create',
+      subjectType: 'AgentMandate',
+      subjectId: agent.id,
+      decision: 'ALLOWED',
+      reason: 'Agent mandate issued by principal',
+      after: mandate,
+      policy: 'AGENT_MANDATE',
+    });
+
+    return mandate;
+  }
+
+  async getOrganisation(id: string): Promise<Organisation> {
+    const organisation = await this.repository.findOrganisation(id);
+    if (!organisation) throw new NotFoundException('Organisation not found');
+    return organisation;
+  }
+
+  async listOrganisations(): Promise<Organisation[]> {
+    return this.repository.listOrganisations();
+  }
+}

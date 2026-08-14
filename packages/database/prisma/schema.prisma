@@ -1,0 +1,267 @@
+// Neo-Lloyds — Phase 1 schema (identity + risk graph).
+// SIMULATION / TEST ENVIRONMENT — NOT INSURANCE.
+//
+// Later phases add their own models and migrations rather than pre-building
+// tables we cannot yet exercise (docs/roadmap.md).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- identity
+
+enum OrganisationKind {
+  COMPANY
+  INDIVIDUAL
+  AI_AGENT
+  REGULATOR
+}
+
+enum KybStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum MarketRole {
+  RISK_ORIGINATOR
+  BROKER
+  UNDERWRITER
+  SYNDICATE
+  CAPITAL_PROVIDER
+  REINSURER
+  INSURER
+  CLAIMS_ADMINISTRATOR
+  SETTLEMENT_PROVIDER
+  REGULATOR
+}
+
+model Organisation {
+  id           String           @id @default(uuid())
+  legalName    String
+  kind         OrganisationKind
+  /// ISO-3166-1 alpha-2. Never defaulted (ADR-0004).
+  jurisdiction String           @db.Char(2)
+  kybStatus    KybStatus        @default(UNVERIFIED)
+  active       Boolean          @default(true)
+
+  /// Required for AI_AGENT: the legally responsible principal.
+  principalOrganisationId String?
+  principal               Organisation?  @relation("AgentPrincipal", fields: [principalOrganisationId], references: [id])
+  agents                  Organisation[] @relation("AgentPrincipal")
+
+  roles          OrganisationRole[]
+  users          User[]
+  credentials    ApiCredential[]
+  mandates       AgentMandate[]     @relation("MandateAgent")
+  grantedMandates AgentMandate[]    @relation("MandatePrincipal")
+  nodes          RiskNode[]
+  auditRecords   AuditRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([jurisdiction])
+  @@index([principalOrganisationId])
+}
+
+/// Each market function is a separate, separately auditable grant.
+model OrganisationRole {
+  id             String       @id @default(uuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  role           MarketRole
+  grantedAt      DateTime     @default(now())
+  grantedBy      String
+
+  @@unique([organisationId, role])
+  @@index([role])
+}
+
+model User {
+  id             String       @id @default(uuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  email          String       @unique
+  displayName    String
+  active         Boolean      @default(true)
+  /// Scopes granted to this user within the organisation.
+  scopes         String[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organisationId])
+}
+
+/// Secrets are stored only as a salted SHA-256 hash (security-model.md §2).
+model ApiCredential {
+  id             String       @id @default(uuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  keyId          String       @unique
+  secretHash     String
+  secretSalt     String
+  label          String
+  scopes         String[]
+  subjectKind    String       @default("SERVICE")
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  lastUsedAt     DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([organisationId])
+}
+
+/// An agent's authority: bounded, expiring, and never wider than its principal's.
+model AgentMandate {
+  id                      String       @id @default(uuid())
+  agentOrganisationId     String
+  agent                   Organisation @relation("MandateAgent", fields: [agentOrganisationId], references: [id], onDelete: Cascade)
+  principalOrganisationId String
+  principal               Organisation @relation("MandatePrincipal", fields: [principalOrganisationId], references: [id])
+  permittedActions        String[]
+  maxTransactionValueMinor BigInt
+  currency                String       @db.Char(3)
+  expiresAt               DateTime
+  revokedAt               DateTime?
+  createdAt               DateTime     @default(now())
+
+  @@index([agentOrganisationId])
+}
+
+// ------------------------------------------------------------- risk graph
+
+enum NodeType {
+  ENTITY
+  ASSET
+  DEPENDENCY
+  RISK
+  HAZARD
+  EXPOSURE
+  EVENT
+  LOSS
+  POLICY
+  COVERAGE
+  PREMIUM
+  CLAIM
+  CAPITAL
+  SYNDICATE
+  REINSURANCE_CONTRACT
+  SETTLEMENT
+}
+
+enum EdgeType {
+  OWNS
+  DEPENDS_ON
+  EXPOSED_TO
+  MAY_CAUSE
+  COVERS
+  SUPPORTS
+  ASSUMES
+  PROTECTS
+  REPRESENTS
+  PAYS
+  SUBJECT_TO
+}
+
+enum SourceKind {
+  USER_DECLARED
+  DOCUMENT
+  EXTERNAL_FEED
+  SENSOR
+  DERIVED
+  AI_INFERRED
+}
+
+model RiskNode {
+  id             String       @id @default(uuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  type           NodeType
+  label          String
+  jurisdiction   String       @db.Char(2)
+  attributes     Json         @default("{}")
+
+  // Provenance, inlined: a node cannot exist without it.
+  sourceId        String
+  sourceKind      SourceKind
+  observedAt      DateTime
+  recordedAt      DateTime
+  confidence      Float
+  transformations Json       @default("[]")
+  modelId         String?
+  modelVersion    String?
+  referencedData  String[]
+
+  outgoing RiskEdge[] @relation("EdgeFrom")
+  incoming RiskEdge[] @relation("EdgeTo")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organisationId, type])
+  @@index([type])
+  @@index([sourceKind])
+}
+
+model RiskEdge {
+  id     String   @id @default(uuid())
+  type   EdgeType
+  fromId String
+  from   RiskNode @relation("EdgeFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  toId   String
+  to     RiskNode @relation("EdgeTo", fields: [toId], references: [id], onDelete: Cascade)
+
+  attributes Json @default("{}")
+
+  sourceId        String
+  sourceKind      SourceKind
+  observedAt      DateTime
+  recordedAt      DateTime
+  confidence      Float
+  transformations Json       @default("[]")
+  modelId         String?
+  modelVersion    String?
+  referencedData  String[]
+
+  createdAt DateTime @default(now())
+
+  /// The same relationship must not be asserted twice.
+  @@unique([type, fromId, toId])
+  @@index([fromId, type])
+  @@index([toId, type])
+}
+
+// ---------------------------------------------------------------- audit
+
+/// Append-only. No update or delete path exists in application code, and the
+/// migration revokes UPDATE/DELETE from the application role.
+model AuditRecord {
+  id                  String       @id @default(uuid())
+  at                  DateTime     @default(now())
+  actorOrganisationId String
+  actorOrganisation   Organisation @relation(fields: [actorOrganisationId], references: [id])
+  actorSubjectId      String
+  actorSubjectKind    String
+  action              String
+  subjectType         String
+  subjectId           String
+  decision            String
+  reason              String
+  before              Json?
+  after               Json?
+  policy              String?
+  modelId             String?
+  modelVersion        String?
+  ontologyVersion     String
+
+  @@index([actorOrganisationId, at])
+  @@index([subjectType, subjectId])
+  @@index([action, at])
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@neo-lloyds/database",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
+    "validate": "prisma validate"
+  },
+  "dependencies": { "@prisma/client": "^6.1.0" },
+  "devDependencies": { "prisma": "^6.1.0" }
+}

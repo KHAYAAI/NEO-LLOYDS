@@ -1,0 +1,42 @@
+# Neo-Lloyds local development stack.
+# SIMULATION / TEST ENVIRONMENT — NOT INSURANCE.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: neolloyds-postgres
+    environment:
+      POSTGRES_USER: neolloyds
+      POSTGRES_PASSWORD: neolloyds
+      POSTGRES_DB: neolloyds
+    ports: ['5432:5432']
+    volumes: ['neolloyds-pgdata:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U neolloyds -d neolloyds']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: neolloyds-redis
+    ports: ['6379:6379']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # S3-compatible object storage for evidence (used from Phase 2 onward).
+  minio:
+    image: minio/minio:latest
+    container_name: neolloyds-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: neolloyds
+      MINIO_ROOT_PASSWORD: neolloyds
+    ports: ['9000:9000', '9001:9001']
+    volumes: ['neolloyds-miniodata:/data']
+
+volumes:
+  neolloyds-pgdata:
+  neolloyds-miniodata:
