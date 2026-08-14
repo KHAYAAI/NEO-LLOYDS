@@ -20,3 +20,6 @@ export * from './graph.js';
 export * from './queries.js';
 export * from './identity.js';
 export * from './audit.js';
+export * from './scoring.js';
+export * from './analyst.js';
+export * from './submission.js';

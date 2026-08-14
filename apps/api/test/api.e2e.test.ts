@@ -418,3 +418,135 @@ describe('identity and governance', () => {
     expect(response.body.records[0].actorOrganisationId).toBe(rootOrgId);
   });
 });
+
+describe('Phase 2: deterministic scoring', () => {
+  it('scores a risk reproducibly and with explicit confidence', async () => {
+    const risk = await createNode('RISK', 'scoring-risk');
+    const body = {
+      factors: [
+        {
+          key: 'f1',
+          description: 'test factor',
+          weight: 1,
+          likelihood: 0.3,
+          confidence: 0.8,
+          basis: 'STATISTICAL_MODEL',
+        },
+      ],
+      maximumEstimatedLossMinor: 1_000_000_00,
+      currency: 'USD',
+      durationDays: 30,
+      mitigationCoverage: 0.1,
+      correlatedRiskCount: 1,
+      concentrationShare: 0.05,
+    };
+
+    const first = await authed().post(`/scoring/risks/${risk}`).send(body).expect(201);
+    const second = await authed().post(`/scoring/risks/${risk}`).send(body).expect(201);
+
+    expect(first.body.score.probability.confidence).toBe(0.8);
+    expect(first.body.score.expectedLoss.expected.amountMinor).toBe(
+      second.body.score.expectedLoss.expected.amountMinor,
+    );
+  });
+
+  it('returns INSUFFICIENT_DATA rather than a guess with no factors', async () => {
+    const risk = await createNode('RISK', 'no-factor-risk');
+    const response = await authed()
+      .post(`/scoring/risks/${risk}`)
+      .send({
+        factors: [],
+        maximumEstimatedLossMinor: 100_00,
+        currency: 'USD',
+        durationDays: 1,
+        mitigationCoverage: 0,
+        correlatedRiskCount: 0,
+        concentrationShare: 0,
+      })
+      .expect(201);
+    expect(response.body.score.probability.basis).toBe('INSUFFICIENT_DATA');
+  });
+
+  it('rejects a weight outside [0,1] with a domain error, not a silent clamp', async () => {
+    const risk = await createNode('RISK', 'bad-weight-risk');
+    const response = await authed()
+      .post(`/scoring/risks/${risk}`)
+      .send({
+        factors: [
+          {
+            key: 'f1',
+            description: 'x',
+            weight: 1.5,
+            likelihood: 0.5,
+            confidence: 0.5,
+            basis: 'OBSERVED',
+          },
+        ],
+        maximumEstimatedLossMinor: 100_00,
+        currency: 'USD',
+        durationDays: 1,
+        mitigationCoverage: 0,
+        correlatedRiskCount: 0,
+        concentrationShare: 0,
+      });
+    expect(response.status).toBe(400);
+  });
+});
+
+describe('Phase 2: AI analyst is advisory and grounded', () => {
+  it('degrades to a MISSING_INFORMATION finding with no provider configured', async () => {
+    const risk = await createNode('RISK', 'analysed-risk');
+    const response = await authed().get(`/analyst/risks/${risk}`).expect(200);
+
+    expect(response.body.findings.length).toBeGreaterThan(0);
+    for (const finding of response.body.findings) {
+      expect(finding.modelId).toBeTruthy();
+      expect(finding.modelVersion).toBeTruthy();
+      expect(finding.referencedData.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('404s for a risk that does not exist', async () => {
+    await authed().get('/analyst/risks/does-not-exist').expect(404);
+  });
+});
+
+describe('Phase 2: risk submission workflow', () => {
+  it('only allows forward transitions through the state machine', async () => {
+    const risk = await createNode('RISK', 'submission-risk');
+    const created = await authed()
+      .post('/submissions')
+      .send({ riskId: risk, title: 'Test submission' })
+      .expect(201);
+    const id = created.body.submission.id as string;
+    expect(created.body.submission.status).toBe('DRAFT');
+
+    await authed().post(`/submissions/${id}/advance`).send({ to: 'SUBMITTED' }).expect(201);
+    await authed().post(`/submissions/${id}/advance`).send({ to: 'ANALYSING' }).expect(201);
+
+    const skip = await authed()
+      .post(`/submissions/${id}/advance`)
+      .send({ to: 'READY_FOR_UNDERWRITING' });
+    expect(skip.status).toBe(422);
+    expect(skip.body.error.code).toBe('INVALID_SUBMISSION_TRANSITION');
+
+    const backward = await authed()
+      .post(`/submissions/${id}/advance`)
+      .send({ to: 'DRAFT' });
+    expect(backward.status).toBe(422);
+  });
+
+  it('isolates submissions by tenant', async () => {
+    const risk = await createNode('RISK', 'tenant-submission-risk');
+    const created = await authed()
+      .post('/submissions')
+      .send({ riskId: risk, title: 'Private' })
+      .expect(201);
+
+    const other = await bootstrapOrganisation('Submission Outsider', ['submission:read'], []);
+    await request(http)
+      .get(`/submissions/${created.body.submission.id}`)
+      .set('Authorization', `Bearer ${other.token}`)
+      .expect(403);
+  });
+});

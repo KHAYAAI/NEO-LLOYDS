@@ -1,0 +1,1 @@
+export const ANALYST_PROVIDER = Symbol('ANALYST_PROVIDER');

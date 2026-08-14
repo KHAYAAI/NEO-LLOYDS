@@ -15,12 +15,20 @@ documentation, local deployment, passing tests.
   queries answering the six graph questions.
 - Prisma schema + initial migration; Docker Compose; test suite.
 
-## Phase 2 — Risk Submission + Risk Scoring + AI Analyst
-Risk package submission from a broker/originator; deterministic scoring engine
-producing probability, severity, expected loss, MEL, duration, correlation,
-concentration and mitigation — each with explicit confidence. AI analyst as an
-*advisory* adapter: every conclusion carries source data, model id, model
-version, timestamp, confidence. Provider abstraction over multiple LLMs.
+## Phase 2 — Risk Submission + Risk Scoring + AI Analyst — **DELIVERED**
+
+- `DRAFT → SUBMITTED → ANALYSING → SCORED → READY_FOR_UNDERWRITING` state
+  machine, forward-only.
+- Deterministic scoring engine producing probability, severity, expected loss,
+  correlation, concentration and mitigation — each an `Estimate`/`RangeEstimate`
+  with explicit confidence and basis. Reproducible: same input, same output.
+- AI analyst as a strictly *advisory* adapter (no method that approves, prices
+  or binds). Every finding cites source data, model id, model version,
+  timestamp, confidence, enforced by `analystFinding()`. Provider abstraction
+  with a null/degraded default and an Anthropic adapter.
+- See `docs/reports/phase-2.md` for the one external dependency this phase
+  introduces (`ANTHROPIC_API_KEY`, optional) and what it does *not* yet
+  depend on (calibrated actuarial data — flagged for before production use).
 
 ## Phase 3 — Underwriting
 Risk package → underwriting assessment (eligible, score, expected loss, premium

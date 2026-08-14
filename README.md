@@ -16,15 +16,18 @@ transferable and financeable — by machines as well as by people. Strategic HQ:
 Johannesburg; the architecture is globally deployable and jurisdiction-neutral
 at its core.
 
-## Status: Phase 1 delivered
+## Status: Phases 1–2 delivered
 
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Identity · Risk ontology · Risk graph | **Delivered** |
-| 2–11 | Scoring, AI analyst, underwriting, marketplace, syndication, capital ledger, claims, simulation, reinsurance, settlement, agent API | Specified, not built — `docs/roadmap.md` |
+| 2 | Risk submission · Deterministic scoring · AI analyst | **Delivered** |
+| 3–11 | Underwriting, marketplace, syndication, capital ledger, claims, simulation, reinsurance, settlement, agent API | Specified, not built — `docs/roadmap.md` |
 
-Phase 1 is built vertically: domain logic, migrations, API, authn/authz, audit
-logging, error handling, docs and a passing test suite.
+Each phase is built vertically: domain logic, migrations where applicable,
+API, authn/authz, audit logging, error handling, docs and a passing test
+suite. See `docs/reports/phase-2.md` for what Phase 2 depends on externally
+before it can move real capital.
 
 ## Quick start
 
@@ -44,10 +47,14 @@ npm -w @neo-lloyds/api run build && npm -w @neo-lloyds/api start
 API on `:3001`, OpenAPI at `/docs`.
 
 ```bash
-npm test        # 65 tests
+npm test        # 84 tests
 npm run typecheck
 npm run lint
 ```
+
+To exercise the AI analyst against a real model instead of the null
+fallback, set `ANTHROPIC_API_KEY` before starting the API — see
+`docs/reports/phase-2.md` for what happens with and without it.
 
 ## The MVP scenario
 
@@ -111,6 +118,6 @@ results are reproducible and testable without infrastructure — see
 - `docs/domain-model.md` — entities, roles, ontology, the seven graph questions
 - `docs/security-model.md` — authn, authz, agent constraints, audit, known gaps
 - `docs/roadmap.md` — phase plan
-- `docs/api/phase-1.md` — endpoint reference
+- `docs/api/reference.md` — endpoint reference
 - `docs/decisions/` — ADRs 0001–0006
 - `docs/reports/phase-1.md` — implementation report
