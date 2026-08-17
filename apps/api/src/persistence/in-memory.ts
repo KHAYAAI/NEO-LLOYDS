@@ -23,12 +23,14 @@ import type {
   GraphRepository,
   IdentityRepository,
   MarketplaceRepository,
+  SimulationRepository,
   StoredCapitalCommitment,
   StoredClaim,
   StoredClaimPayout,
   StoredCredential,
   StoredInterest,
   StoredListing,
+  StoredSimulationRun,
   StoredSyndication,
   SubmissionRepository,
   SyndicationRepository,
@@ -602,6 +604,37 @@ export class InMemoryClaimsRepository implements ClaimsRepository {
 
   async listPayouts(claimId: string): Promise<StoredClaimPayout[]> {
     return this.payouts.get(claimId) ?? [];
+  }
+}
+
+export class InMemorySimulationRepository implements SimulationRepository {
+  private readonly runs = new Map<string, StoredSimulationRun>();
+
+  async create(input: {
+    id: string;
+    organisationId: string;
+    requestedBy: string;
+    scenarioKind: string;
+    triggerNodeId: string;
+    durationDays: number;
+    severity: number;
+    description: string | null;
+    currency: string;
+    result: unknown;
+  }): Promise<StoredSimulationRun> {
+    const run: StoredSimulationRun = { ...input, createdAt: new Date() };
+    this.runs.set(run.id, run);
+    return run;
+  }
+
+  async find(id: string): Promise<StoredSimulationRun | undefined> {
+    return this.runs.get(id);
+  }
+
+  async listByOrganisation(organisationId: string): Promise<StoredSimulationRun[]> {
+    return [...this.runs.values()]
+      .filter((r) => r.organisationId === organisationId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 }
 

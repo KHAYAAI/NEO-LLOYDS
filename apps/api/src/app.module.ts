@@ -27,6 +27,8 @@ import { CapitalController } from './capital/capital.controller.js';
 import { CapitalService } from './capital/capital.service.js';
 import { ClaimsController } from './claims/claims.controller.js';
 import { ClaimsService } from './claims/claims.service.js';
+import { SimulationController } from './simulation/simulation.controller.js';
+import { SimulationService } from './simulation/simulation.service.js';
 import {
   AUDIT_REPOSITORY,
   CAPITAL_REPOSITORY,
@@ -35,6 +37,7 @@ import {
   GRAPH_REPOSITORY,
   IDENTITY_REPOSITORY,
   MARKETPLACE_REPOSITORY,
+  SIMULATION_REPOSITORY,
   SUBMISSION_REPOSITORY,
   SYNDICATION_REPOSITORY,
   UNDERWRITING_REPOSITORY,
@@ -47,6 +50,7 @@ import {
   PrismaIdentityRepository,
   PrismaMarketplaceRepository,
   PrismaService,
+  PrismaSimulationRepository,
   PrismaSubmissionRepository,
   PrismaSyndicationRepository,
   PrismaUnderwritingRepository,
@@ -83,6 +87,7 @@ const CONTROLLERS = [
   SyndicationController,
   CapitalController,
   ClaimsController,
+  SimulationController,
 ];
 
 const SERVICES = [
@@ -96,6 +101,7 @@ const SERVICES = [
   SyndicationService,
   CapitalService,
   ClaimsService,
+  SimulationService,
   AuditService,
 ];
 
@@ -115,6 +121,7 @@ export class AppModule {
     syndication: unknown;
     capital: unknown;
     claims: unknown;
+    simulation: unknown;
     clock: unknown;
     analystProvider?: unknown;
     extra?: unknown[];
@@ -135,6 +142,7 @@ export class AppModule {
         { provide: SYNDICATION_REPOSITORY, useValue: providers.syndication },
         { provide: CAPITAL_REPOSITORY, useValue: providers.capital },
         { provide: CLAIMS_REPOSITORY, useValue: providers.claims },
+        { provide: SIMULATION_REPOSITORY, useValue: providers.simulation },
         { provide: CLOCK, useValue: providers.clock },
         {
           provide: ANALYST_PROVIDER,
@@ -165,6 +173,7 @@ export class AppModule {
         { provide: SYNDICATION_REPOSITORY, useClass: PrismaSyndicationRepository },
         { provide: CAPITAL_REPOSITORY, useClass: PrismaCapitalRepository },
         { provide: CLAIMS_REPOSITORY, useClass: PrismaClaimsRepository },
+        { provide: SIMULATION_REPOSITORY, useClass: PrismaSimulationRepository },
         { provide: CLOCK, useClass: SystemClock },
         { provide: ANALYST_PROVIDER, useFactory: createAnalystProvider },
         { provide: APP_GUARD, useClass: ApiCredentialGuard },

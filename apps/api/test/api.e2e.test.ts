@@ -16,6 +16,7 @@ import {
   InMemorySubmissionRepository,
   InMemoryCapitalRepository,
   InMemoryClaimsRepository,
+  InMemorySimulationRepository,
   InMemorySyndicationRepository,
   InMemoryUnderwritingRepository,
   SystemClock,
@@ -31,6 +32,7 @@ const marketplaceRepo = new InMemoryMarketplaceRepository();
 const syndicationRepo = new InMemorySyndicationRepository();
 const capitalRepo = new InMemoryCapitalRepository();
 const claimsRepo = new InMemoryClaimsRepository();
+const simulationRepo = new InMemorySimulationRepository();
 
 let app: NestExpressApplication;
 let http: ReturnType<NestExpressApplication['getHttpServer']>;
@@ -81,6 +83,7 @@ beforeAll(async () => {
         syndication: syndicationRepo,
         capital: capitalRepo,
         claims: claimsRepo,
+        simulation: simulationRepo,
         clock: new SystemClock(),
       }),
     ],
@@ -398,6 +401,139 @@ describe('the MVP shipment scenario', () => {
     expect(picture.body.capitalBearing[0].capital.map((c: { id: string }) => c.id)).toEqual([
       capital,
     ]);
+  });
+});
+
+describe('Phase 8: Simulation & Digital Twin', () => {
+  async function buildFixtureGraph() {
+    const shipper = await createNode('ENTITY', 'Kalahari Logistics');
+    const shipment = await createNode('ASSET', 'Shipment KL-9001');
+    const vessel = await createNode('ASSET', 'MV Tugela');
+    const port = await createNode('ASSET', 'Port of Richards Bay');
+    const risk = await createNode('RISK', 'Port closure > 72h (sim)');
+    const policy = await createNode('POLICY', 'Marine cargo cover (sim)');
+    const syndicate = await createNode('SYNDICATE', 'Syndicate Beta');
+    const capital = await createNode('CAPITAL', 'Fund II commitment');
+
+    await createEdge('OWNS', shipper, shipment).expect(201);
+    await createEdge('DEPENDS_ON', shipment, vessel).expect(201);
+    await createEdge('DEPENDS_ON', vessel, port).expect(201);
+    await createEdge('EXPOSED_TO', port, risk).expect(201);
+    await createEdge('COVERS', policy, risk).expect(201);
+    await createEdge('ASSUMES', syndicate, risk).expect(201);
+    await createEdge('SUPPORTS', capital, syndicate).expect(201);
+
+    return { shipper, shipment, vessel, port, risk, policy, syndicate, capital };
+  }
+
+  it('runs a scenario forward from the graph and persists the result', async () => {
+    const { shipper, shipment, vessel, port, syndicate } = await buildFixtureGraph();
+
+    const response = await authed()
+      .post('/simulation')
+      .send({
+        kind: 'PORT_CLOSURE',
+        triggerNodeId: port,
+        durationDays: 3,
+        severity: 0.7,
+        description: 'e2e port closure',
+        currency: 'ZAR',
+      })
+      .expect(201);
+
+    const run = response.body.simulationRun;
+    expect(run.id).toBeTruthy();
+    const result = run.result;
+    expect(result.affectedAssets.map((a: { id: string }) => a.id).sort()).toEqual(
+      [shipment, vessel].sort(),
+    );
+    expect(result.exposedEntities.map((e: { id: string }) => e.id)).toContain(shipper);
+    expect(result.estimatedLoss.confidence).toBeLessThanOrEqual(0.2);
+    expect(result.estimatedLoss.basis).toBe('INSUFFICIENT_DATA');
+    expect(result.capitalRequirement.map((c: { syndicate: { id: string } }) => c.syndicate.id)).toEqual([
+      syndicate,
+    ]);
+    expect(result.insuredVsUninsured.insuredEntities.map((e: { id: string }) => e.id)).toContain(
+      shipper,
+    );
+  });
+
+  it('exercises every scenario kind without error', async () => {
+    const { port } = await buildFixtureGraph();
+    const kinds = [
+      'PORT_CLOSURE',
+      'SUPPLY_CHAIN_DISRUPTION',
+      'COMMODITY_SHOCK',
+      'WEATHER',
+      'INFRASTRUCTURE_FAILURE',
+      'COUNTERPARTY_FAILURE',
+      'GEOPOLITICAL',
+      'CYBER',
+    ];
+    for (const kind of kinds) {
+      await authed()
+        .post('/simulation')
+        .send({ kind, triggerNodeId: port, durationDays: 5, severity: 0.5, currency: 'ZAR' })
+        .expect(201);
+    }
+  });
+
+  it('retrieves a persisted simulation run by id', async () => {
+    const { port } = await buildFixtureGraph();
+    const created = await authed()
+      .post('/simulation')
+      .send({ kind: 'CYBER', triggerNodeId: port, durationDays: 1, severity: 0.3, currency: 'ZAR' })
+      .expect(201);
+
+    const fetched = await authed()
+      .get(`/simulation/${created.body.simulationRun.id}`)
+      .expect(200);
+    expect(fetched.body.simulationRun.id).toBe(created.body.simulationRun.id);
+  });
+
+  it('lists simulation runs for the organisation', async () => {
+    const { port } = await buildFixtureGraph();
+    await authed()
+      .post('/simulation')
+      .send({ kind: 'WEATHER', triggerNodeId: port, durationDays: 2, severity: 0.4, currency: 'ZAR' })
+      .expect(201);
+
+    const list = await authed().get('/simulation').expect(200);
+    expect(Array.isArray(list.body.simulationRuns)).toBe(true);
+    expect(list.body.simulationRuns.length).toBeGreaterThan(0);
+  });
+
+  it('rejects an unknown scenario kind at the validation layer', async () => {
+    const { port } = await buildFixtureGraph();
+    await authed()
+      .post('/simulation')
+      .send({ kind: 'METEOR_STRIKE', triggerNodeId: port, durationDays: 2, severity: 0.4, currency: 'ZAR' })
+      .expect(400);
+  });
+
+  it('rejects a severity outside [0,1] at the validation layer', async () => {
+    const { port } = await buildFixtureGraph();
+    await authed()
+      .post('/simulation')
+      .send({ kind: 'WEATHER', triggerNodeId: port, durationDays: 2, severity: 4, currency: 'ZAR' })
+      .expect(400);
+  });
+
+  it('requires a credential', async () => {
+    await request(http).post('/simulation').send({}).expect(401);
+  });
+
+  it('rejects an unknown trigger node with 404', async () => {
+    await authed()
+      .post('/simulation')
+      .send({
+        kind: 'WEATHER',
+        triggerNodeId: 'does-not-exist',
+        durationDays: 2,
+        severity: 0.4,
+        currency: 'ZAR',
+      })
+      .expect(404);
   });
 });
 

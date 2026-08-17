@@ -73,6 +73,7 @@ model Organisation {
   capitalCommitment      CapitalCommitment?
   claims                 Claim[]
   claimPayouts           ClaimPayout[]
+  simulationRuns         SimulationRun[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -578,4 +579,42 @@ model ClaimPayout {
   @@unique([claimId, organisationId])
   @@index([claimId])
   @@index([organisationId])
+}
+
+/// Phase 8 — Simulation & Digital Twin. The first phase that runs *forward*
+/// from the risk graph rather than processing something that already
+/// happened. Persisted so a scenario result is a durable, auditable,
+/// retrievable record — the same reasoning as every other analytical output
+/// in this system — not a fire-and-forget computation.
+enum SimulationScenarioKind {
+  PORT_CLOSURE
+  SUPPLY_CHAIN_DISRUPTION
+  COMMODITY_SHOCK
+  WEATHER
+  INFRASTRUCTURE_FAILURE
+  COUNTERPARTY_FAILURE
+  GEOPOLITICAL
+  CYBER
+}
+
+model SimulationRun {
+  id                String                 @id @default(uuid())
+  organisationId    String
+  organisation      Organisation           @relation(fields: [organisationId], references: [id])
+  requestedBy       String
+  scenarioKind      SimulationScenarioKind
+  triggerNodeId     String
+  durationDays      Int
+  severity          Float
+  description       String?
+  currency          String                 @db.Char(3)
+  /// Full SimulationResult (affected assets, exposed entities, correlated
+  /// exposure, capital requirement, insured/uninsured split), stored as JSON
+  /// rather than normalised across half a dozen join tables — this is a
+  /// read-mostly analytical snapshot, not a record anything else joins
+  /// against transactionally.
+  result            Json
+  createdAt         DateTime               @default(now())
+
+  @@index([organisationId, createdAt])
 }

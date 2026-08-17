@@ -164,6 +164,23 @@ declared committed capital.
 | GET | `/claims/:id/payouts` | `claims:read` | Each capital provider's exact share of an approved claim, summing exactly to the claimed loss |
 | GET | `/claims/by-syndication/:syndicationId` | `claims:read` | |
 
+## Simulation & Digital Twin (Phase 8)
+
+> Runs forward from the risk graph: "what would this event do to what's insured here." See `docs/reports/phase-8.md` for what the estimated-loss figure is and is not.
+
+| Method | Path | Scope / roles | Notes |
+|---|---|---|---|
+| POST | `/simulation` | `simulation:run` + originator/broker/syndicate/`CLAIMS_ADMINISTRATOR` | Runs a scenario (`kind`, `triggerNodeId`, `durationDays`, `severity` in `[0,1]`, optional `description`, `currency`) against the trigger node's owning organisation's graph. Persists the result. `404` if the trigger node does not exist. |
+| GET | `/simulation/:id` | `simulation:read` | Retrieves a persisted simulation run, including its full result. |
+| GET | `/simulation` | `simulation:read` | Lists the caller's organisation's past runs, most recent first. |
+
+Scenario kinds: `PORT_CLOSURE`, `SUPPLY_CHAIN_DISRUPTION`, `COMMODITY_SHOCK`,
+`WEATHER`, `INFRASTRUCTURE_FAILURE`, `COUNTERPARTY_FAILURE`, `GEOPOLITICAL`,
+`CYBER`. A run's `result` includes `affectedAssets`, `exposedEntities`,
+`estimatedLoss` (an `Estimate`, always `confidence: 0.2` /
+`basis: "INSUFFICIENT_DATA"` — not a priced figure), `correlatedExposure`,
+`capitalRequirement`, and `insuredVsUninsured`.
+
 ## Errors
 
 Domain invariant violations return `422` with a machine-readable code:

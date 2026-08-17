@@ -282,6 +282,38 @@ export interface ClaimsRepository {
   listPayouts(claimId: string): Promise<StoredClaimPayout[]>;
 }
 
+export interface StoredSimulationRun {
+  id: string;
+  organisationId: string;
+  requestedBy: string;
+  scenarioKind: string;
+  triggerNodeId: string;
+  durationDays: number;
+  severity: number;
+  description: string | null;
+  currency: string;
+  /** The full `SimulationResult` from `@neo-lloyds/domain`, as persisted JSON. */
+  result: unknown;
+  createdAt: Date;
+}
+
+export interface SimulationRepository {
+  create(input: {
+    id: string;
+    organisationId: string;
+    requestedBy: string;
+    scenarioKind: string;
+    triggerNodeId: string;
+    durationDays: number;
+    severity: number;
+    description: string | null;
+    currency: string;
+    result: unknown;
+  }): Promise<StoredSimulationRun>;
+  find(id: string): Promise<StoredSimulationRun | undefined>;
+  listByOrganisation(organisationId: string): Promise<StoredSimulationRun[]>;
+}
+
 export const IDENTITY_REPOSITORY = Symbol('IDENTITY_REPOSITORY');
 export const AUDIT_REPOSITORY = Symbol('AUDIT_REPOSITORY');
 export const GRAPH_REPOSITORY = Symbol('GRAPH_REPOSITORY');
@@ -291,6 +323,7 @@ export const MARKETPLACE_REPOSITORY = Symbol('MARKETPLACE_REPOSITORY');
 export const SYNDICATION_REPOSITORY = Symbol('SYNDICATION_REPOSITORY');
 export const CAPITAL_REPOSITORY = Symbol('CAPITAL_REPOSITORY');
 export const CLAIMS_REPOSITORY = Symbol('CLAIMS_REPOSITORY');
+export const SIMULATION_REPOSITORY = Symbol('SIMULATION_REPOSITORY');
 export const CLOCK = Symbol('CLOCK');
 
 export interface Clock {

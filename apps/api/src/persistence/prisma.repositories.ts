@@ -27,12 +27,14 @@ import type {
   GraphRepository,
   IdentityRepository,
   MarketplaceRepository,
+  SimulationRepository,
   StoredCapitalCommitment,
   StoredClaim,
   StoredClaimPayout,
   StoredCredential,
   StoredInterest,
   StoredListing,
+  StoredSimulationRun,
   StoredSyndication,
   SubmissionRepository,
   SyndicationRepository,
@@ -1166,5 +1168,80 @@ export class PrismaClaimsRepository implements ClaimsRepository {
       organisationId: row.organisationId,
       amount: money(Number(row.amountMinor), row.currency),
     }));
+  }
+}
+
+@Injectable()
+export class PrismaSimulationRepository implements SimulationRepository {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private toDomain(row: {
+    id: string;
+    organisationId: string;
+    requestedBy: string;
+    scenarioKind: string;
+    triggerNodeId: string;
+    durationDays: number;
+    severity: number;
+    description: string | null;
+    currency: string;
+    result: unknown;
+    createdAt: Date;
+  }): StoredSimulationRun {
+    return {
+      id: row.id,
+      organisationId: row.organisationId,
+      requestedBy: row.requestedBy,
+      scenarioKind: row.scenarioKind,
+      triggerNodeId: row.triggerNodeId,
+      durationDays: row.durationDays,
+      severity: row.severity,
+      description: row.description,
+      currency: row.currency,
+      result: row.result,
+      createdAt: row.createdAt,
+    };
+  }
+
+  async create(input: {
+    id: string;
+    organisationId: string;
+    requestedBy: string;
+    scenarioKind: string;
+    triggerNodeId: string;
+    durationDays: number;
+    severity: number;
+    description: string | null;
+    currency: string;
+    result: unknown;
+  }): Promise<StoredSimulationRun> {
+    const row = await this.prisma.simulationRun.create({
+      data: {
+        id: input.id,
+        organisationId: input.organisationId,
+        requestedBy: input.requestedBy,
+        scenarioKind: input.scenarioKind as never,
+        triggerNodeId: input.triggerNodeId,
+        durationDays: input.durationDays,
+        severity: input.severity,
+        description: input.description,
+        currency: input.currency,
+        result: input.result as never,
+      },
+    });
+    return this.toDomain(row);
+  }
+
+  async find(id: string): Promise<StoredSimulationRun | undefined> {
+    const row = await this.prisma.simulationRun.findUnique({ where: { id } });
+    return row ? this.toDomain(row) : undefined;
+  }
+
+  async listByOrganisation(organisationId: string): Promise<StoredSimulationRun[]> {
+    const rows = await this.prisma.simulationRun.findMany({
+      where: { organisationId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((row) => this.toDomain(row));
   }
 }

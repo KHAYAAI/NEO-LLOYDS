@@ -114,11 +114,29 @@ documentation, local deployment, passing tests.
   running-total check, and for a real bug the e2e suite caught (a rejection
   decision was tripping the check meant to guard approvals) before it shipped.
 
-## Phase 8 — Simulation & Digital Twin
+## Phase 8 — Simulation & Digital Twin — **DELIVERED**
+
 Port closure, supply-chain disruption, commodity shock, weather, infrastructure
 failure, counterparty failure, geopolitical, cyber. Outputs exposed entities,
 affected assets, estimated loss, correlated exposure, capital requirement,
-insured vs uninsured. The core differentiator.
+insured vs uninsured. The core differentiator, and the first phase that runs
+*forward* from the risk graph rather than processing something that already
+happened.
+
+- `runSimulation` (`packages/domain/src/simulation.ts`) is built entirely on
+  Phase 1's existing pure query functions (`dependentsOf`, `exposedEntities`,
+  `correlatedEntities`, `coveringPolicies`, `capitalBearingRisk`) — no second
+  graph-traversal implementation, so a simulation can never disagree with the
+  graph about what depends on what.
+- The estimated-loss figure is deliberately low-confidence
+  (`confidence: 0.2`, `basis: 'INSUFFICIENT_DATA'`, always): there is no
+  actuarial model behind it, by design, until real peril-specific damage
+  functions and loss history exist. See `docs/reports/phase-8.md`.
+- Insured-vs-uninsured resolution is risk-level, not entity-level — a
+  documented ontology gap (no `POLICY -> ENTITY` edge exists yet), not a
+  fabricated per-entity link.
+- See `docs/reports/phase-8.md` for a live run against the seeded MVP
+  shipment scenario, verified end to end against PostgreSQL.
 
 ## Phase 9 — Reinsurance
 Configurable layers, quota share, excess of loss, aggregate protection — as
