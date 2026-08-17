@@ -1,5 +1,6 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ApiCredentialGuard } from './common/auth.js';
 import { AuditService } from './common/audit.service.js';
 import { HealthController } from './common/health.controller.js';
@@ -52,6 +53,23 @@ import {
 } from './persistence/prisma.repositories.js';
 import { SystemClock } from './persistence/in-memory.js';
 
+/**
+ * Global IP-based rate limit, in front of the per-credential auth guard —
+ * this is what stops a credential-guessing loop from being cheap, since it
+ * caps request volume before a single secret comparison happens. Configurable
+ * because the right ceiling depends on real traffic patterns this prototype
+ * has none of yet; the default is deliberately generous for local dev and
+ * integration testing, not tuned for a production SLA.
+ */
+const THROTTLER_IMPORTS = [
+  ThrottlerModule.forRoot([
+    {
+      ttl: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000),
+      limit: Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? 300),
+    },
+  ]),
+];
+
 const CONTROLLERS = [
   HealthController,
   OntologyController,
@@ -103,9 +121,11 @@ export class AppModule {
   }): DynamicModule {
     return {
       module: AppModule,
+      imports: THROTTLER_IMPORTS,
       controllers: CONTROLLERS,
       providers: [
         ...SERVICES,
+        { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: IDENTITY_REPOSITORY, useValue: providers.identity },
         { provide: AUDIT_REPOSITORY, useValue: providers.audit },
         { provide: GRAPH_REPOSITORY, useValue: providers.graph },
@@ -130,10 +150,12 @@ export class AppModule {
   static forRoot(): DynamicModule {
     return {
       module: AppModule,
+      imports: THROTTLER_IMPORTS,
       controllers: CONTROLLERS,
       providers: [
         PrismaService,
         ...SERVICES,
+        { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: IDENTITY_REPOSITORY, useClass: PrismaIdentityRepository },
         { provide: AUDIT_REPOSITORY, useClass: PrismaAuditRepository },
         { provide: GRAPH_REPOSITORY, useClass: PrismaGraphRepository },

@@ -3,6 +3,7 @@ import {
   ExecutionContext,
   Inject,
   Injectable,
+  Logger,
   SetMetadata,
   UnauthorizedException,
   ForbiddenException,
@@ -59,6 +60,8 @@ export const Public = () => SetMetadata(PUBLIC_ROUTE, true);
 export interface RequestWithAuth {
   auth?: AuthContext;
   headers: Record<string, string | string[] | undefined>;
+  method?: string;
+  url?: string;
 }
 
 /**
@@ -69,6 +72,8 @@ export interface RequestWithAuth {
  */
 @Injectable()
 export class ApiCredentialGuard implements CanActivate {
+  private readonly logger = new Logger(ApiCredentialGuard.name);
+
   constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
     @Inject(IDENTITY_REPOSITORY) private readonly identity: IdentityRepository,
@@ -92,6 +97,9 @@ export class ApiCredentialGuard implements CanActivate {
       [];
     for (const scope of scopes) {
       if (!hasScope(auth, scope)) {
+        this.logger.warn(
+          `Forbidden: organisation ${auth.organisationId} missing scope ${scope} on ${request.method ?? ''} ${request.url ?? ''}`,
+        );
         throw new ForbiddenException(`Missing required scope: ${scope}`);
       }
     }
@@ -102,6 +110,9 @@ export class ApiCredentialGuard implements CanActivate {
         controller,
       ]) ?? [];
     if (roles.length > 0 && !roles.some((role) => auth.roles.includes(role))) {
+      this.logger.warn(
+        `Forbidden: organisation ${auth.organisationId} lacks any of [${roles.join(', ')}] on ${request.method ?? ''} ${request.url ?? ''}`,
+      );
       throw new ForbiddenException(
         `Organisation is not authorised for any of: ${roles.join(', ')}`,
       );
@@ -110,6 +121,14 @@ export class ApiCredentialGuard implements CanActivate {
     return true;
   }
 
+  /**
+   * Every rejection here is logged at WARN with the presented key id (never
+   * the secret) — this is the minimum signal an operator needs to notice a
+   * credential-guessing or credential-stuffing attempt before it succeeds.
+   * The client-facing message stays uniform (`Invalid credential`) so a
+   * caller can never distinguish "unknown key" from "wrong secret" — only
+   * the server-side log, which the caller cannot read, is more specific.
+   */
   private async resolve(request: RequestWithAuth): Promise<AuthContext> {
     const header = request.headers['authorization'];
     const value = Array.isArray(header) ? header[0] : header;
@@ -121,6 +140,7 @@ export class ApiCredentialGuard implements CanActivate {
     const token = value.slice('Bearer '.length);
     const separator = token.indexOf('.');
     if (separator < 0) {
+      this.logger.warn('Rejected malformed credential (no keyId separator)');
       throw new UnauthorizedException('Malformed credential: expected <keyId>.<secret>');
     }
 
@@ -129,18 +149,22 @@ export class ApiCredentialGuard implements CanActivate {
 
     const credential = await this.identity.findCredentialByKeyId(keyId);
     if (!credential || !secretMatches(secret, credential.secretSalt, credential.secretHash)) {
+      this.logger.warn(`Rejected invalid credential for keyId ${keyId}`);
       // Same message for unknown key and bad secret: do not reveal which.
       throw new UnauthorizedException('Invalid credential');
     }
     if (credential.revokedAt) {
+      this.logger.warn(`Rejected revoked credential ${keyId}`);
       throw new UnauthorizedException('Credential has been revoked');
     }
     if (credential.expiresAt && credential.expiresAt.getTime() <= this.clock.now().getTime()) {
+      this.logger.warn(`Rejected expired credential ${keyId}`);
       throw new UnauthorizedException('Credential has expired');
     }
 
     const organisation = await this.identity.findOrganisation(credential.organisationId);
     if (!organisation || !organisation.active) {
+      this.logger.warn(`Rejected credential ${keyId} for inactive/unknown organisation`);
       throw new UnauthorizedException('Organisation is not active');
     }
 

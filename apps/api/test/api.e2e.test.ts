@@ -1,12 +1,13 @@
 import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { DomainExceptionFilter } from '../src/common/domain-exception.filter.js';
 import { SimulationNoticeInterceptor } from '../src/common/simulation.interceptor.js';
+import { hardenApp } from '../src/common/harden.js';
 import {
   InMemoryAuditRepository,
   InMemoryGraphRepository,
@@ -31,8 +32,8 @@ const syndicationRepo = new InMemorySyndicationRepository();
 const capitalRepo = new InMemoryCapitalRepository();
 const claimsRepo = new InMemoryClaimsRepository();
 
-let app: INestApplication;
-let http: string;
+let app: NestExpressApplication;
+let http: ReturnType<NestExpressApplication['getHttpServer']>;
 
 /** Root credential, bootstrapped the way the seed script does. */
 let rootToken: string;
@@ -85,7 +86,10 @@ beforeAll(async () => {
     ],
   }).compile();
 
-  app = moduleRef.createNestApplication();
+  process.env.CORS_ALLOWED_ORIGINS = 'https://allowed.test';
+
+  app = moduleRef.createNestApplication<NestExpressApplication>();
+  hardenApp(app);
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
   );
@@ -163,6 +167,46 @@ describe('public surface', () => {
           r.type === 'ASSUMES' && r.from === 'SYNDICATE' && r.to === 'RISK',
       ),
     ).toBe(true);
+  });
+});
+
+describe('hardening (docs/security-model.md §9)', () => {
+  it('sets standard security headers on every response, including public routes', async () => {
+    const response = await request(http).get('/health').expect(200);
+    expect(response.headers['x-frame-options']).toBe('SAMEORIGIN');
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+    expect(response.headers['content-security-policy']).toContain("default-src 'self'");
+    expect(response.headers['x-powered-by']).toBeUndefined();
+  });
+
+  it('allows CORS from an explicitly allow-listed origin', async () => {
+    const response = await request(http)
+      .get('/health')
+      .set('Origin', 'https://allowed.test')
+      .expect(200);
+    expect(response.headers['access-control-allow-origin']).toBe('https://allowed.test');
+  });
+
+  it('does not grant CORS to an origin that was never allow-listed', async () => {
+    const response = await request(http)
+      .get('/health')
+      .set('Origin', 'https://not-allowed.test')
+      .expect(200);
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('rejects a request body over the configured size limit', async () => {
+    const oversized = 'x'.repeat(300 * 1024); // 300KB against a 256KB cap
+    const response = await authed()
+      .post('/graph/nodes')
+      .send({
+        type: 'ASSET',
+        label: 'x',
+        jurisdiction: 'ZA',
+        provenance: provenanceBody(),
+        attributes: { note: oversized },
+      });
+    expect(response.status).toBe(413);
   });
 });
 
