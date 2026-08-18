@@ -175,10 +175,25 @@ operation. Configurable fee engine.
   the AI analyst provider and the SSO gap: an honest simulation beats a fake
   real one. See `docs/reports/phase-10.md`.
 
-## Phase 11 — AI Agent API
+## Phase 11 — AI Agent API — **DELIVERED**
+
 Authenticate → submit activity → request assessment → indicative protection →
 coverage options → human approval where required → permitted execution →
 settlement information. Mandate enforcement throughout.
+
+- Every step delegates to the existing service a human caller uses for the
+  same action — this phase adds no parallel logic. What it adds is the
+  first live call to `assertAgentMayAct` (built and unit-tested since Phase
+  1, never wired into a request path until now): mandate existence,
+  principal resolution and active/KYB status, expiry, permitted action, and
+  transaction ceiling, all enforced before the underlying service runs.
+- `assertAgentMayAct` is a documented no-op for non-agent callers, so every
+  `/agent/*` route also works for a human/service credential with no
+  mandate gate in the way — there is no separate agent path
+  (security-model.md §4).
+- Verified live: a mandate with a $500 ceiling correctly rejected a $600
+  execution attempt with `403`, confirmed to happen *before* the target
+  listing was even looked up. See `docs/reports/phase-11.md`.
 
 ## Continuous
 Jurisdiction modules (ZA first, then UK/EU/US), portals (broker, capital,

@@ -1789,6 +1789,262 @@ describe('Phase 9: Reinsurance', () => {
   });
 });
 
+describe('Phase 11: AI Agent API', () => {
+  async function bootstrapAgent(
+    permittedActions: string[],
+    maxTransactionValueMinor: number,
+    currency = 'USD',
+  ): Promise<{ token: string; agentOrgId: string }> {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const agentOrg = await identity.createOrganisation({
+      id: `org-agent-${suffix}`,
+      legalName: `Test Agent ${suffix}`,
+      kind: 'AI_AGENT',
+      jurisdiction: 'ZA',
+      principalOrganisationId: rootOrgId,
+    });
+    for (const role of ['RISK_ORIGINATOR', 'BROKER', 'CAPITAL_PROVIDER', 'UNDERWRITER']) {
+      await identity.grantRole(agentOrg.id, role as never);
+    }
+
+    const { keyId, secret, salt } = generateCredential();
+    await identity.createCredential({
+      id: `cred-${agentOrg.id}`,
+      keyId,
+      secretHash: hashSecret(secret, salt),
+      secretSalt: salt,
+      organisationId: agentOrg.id,
+      label: 'agent-test',
+      scopes: ['*'],
+      subjectKind: 'AGENT',
+      expiresAt: null,
+    });
+
+    await identity.createMandate({
+      id: `mandate-${agentOrg.id}`,
+      agentOrganisationId: agentOrg.id,
+      principalOrganisationId: rootOrgId,
+      permittedActions,
+      maxTransactionValueMinor,
+      currency,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    });
+
+    return { token: `${keyId}.${secret}`, agentOrgId: agentOrg.id };
+  }
+
+  it('lets a mandated agent submit activity', async () => {
+    const { token } = await bootstrapAgent(['activity.submit'], 1_000_00);
+    const risk = await createNode('RISK', 'agent-activity-risk', token);
+
+    const response = await request(http)
+      .post('/agent/activity')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ riskId: risk, title: 'Agent-submitted activity' })
+      .expect(201);
+    expect(response.body.submission.status).toBe('DRAFT');
+  });
+
+  it('rejects an action outside the agent mandate\'s permitted actions', async () => {
+    const { token } = await bootstrapAgent(['risk.assess'], 1_000_00); // no activity.submit
+    const risk = await createNode('RISK', 'agent-forbidden-action-risk', token);
+
+    await request(http)
+      .post('/agent/activity')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ riskId: risk, title: 'Should be forbidden' })
+      .expect(403);
+  });
+
+  it('returns the indicative protection for a risk with an existing assessment, never binding it', async () => {
+    const { token } = await bootstrapAgent(['protection.indicative'], 1_000_00);
+    const risk = await createNode('RISK', 'agent-protection-risk', token);
+
+    await request(http)
+      .post(`/underwriting/risks/${risk}/assess`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        factors: [{ key: 'f1', description: 'test factor', weight: 1, likelihood: 0.3, confidence: 0.8, basis: 'EXPERT_JUDGEMENT' }],
+        maximumEstimatedLossMinor: 100_000_00,
+        currency: 'USD',
+        durationDays: 30,
+        mitigationCoverage: 0.5,
+        correlatedRiskCount: 0,
+        concentrationShare: 0.1,
+      })
+      .expect(201);
+
+    const response = await request(http)
+      .get(`/agent/risks/${risk}/indicative-protection`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(response.body.indicative).toBe(true);
+    expect(response.body.disclosure).toContain('not a binding offer');
+    expect(typeof response.body.humanApprovalRequired).toBe('boolean');
+  });
+
+  it('lists coverage options as open marketplace listings', async () => {
+    const { token } = await bootstrapAgent(['coverage.browse'], 1_000_00);
+    const response = await request(http)
+      .get('/agent/coverage-options')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(Array.isArray(response.body.listings)).toBe(true);
+  });
+
+  it('enforces the mandate transaction ceiling on permitted execution', async () => {
+    const { token } = await bootstrapAgent(['coverage.bind'], 500_00); // ceiling: $500
+
+    // Build a listable, underwritten risk under the agent's own organisation
+    // so a real OPEN listing exists to execute against (tenant isolation
+    // scopes resources to the acting organisation, not the principal's).
+    const risk = await createNode('RISK', 'agent-exec-risk', token);
+    const submissionResp = await request(http)
+      .post('/submissions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ riskId: risk, title: 'Agent execution test submission' })
+      .expect(201);
+    const submission = submissionResp.body.submission;
+
+    // Low likelihood/confidence factors keep this in the LOW approval band,
+    // same as the Phase 4 e2e fixture, so no human underwriter approval is
+    // needed before the listing can be created.
+    await request(http)
+      .post(`/underwriting/risks/${risk}/assess`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        factors: [
+          { key: 'f1', description: 'd', weight: 1, likelihood: 0.01, confidence: 0.95, basis: 'STATISTICAL_MODEL' },
+        ],
+        maximumEstimatedLossMinor: 10_000,
+        currency: 'USD',
+        durationDays: 30,
+        mitigationCoverage: 0,
+        correlatedRiskCount: 0,
+        concentrationShare: 0,
+      })
+      .expect(201);
+
+    for (const to of ['SUBMITTED', 'ANALYSING', 'SCORED', 'READY_FOR_UNDERWRITING']) {
+      await request(http)
+        .post(`/submissions/${submission.id}/advance`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ to })
+        .expect(201);
+    }
+
+    const listingResp = await request(http)
+      .post('/marketplace/listings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        submissionId: submission.id,
+        riskClass: 'test-class',
+        capacityMinor: 1_000_000_00,
+        currency: 'USD',
+        durationDays: 30,
+      })
+      .expect(201);
+    const listing = listingResp.body.listing;
+
+    // Over the $500 mandate ceiling: rejected before expressInterest ever runs.
+    await request(http)
+      .post(`/agent/coverage-options/${listing.id}/execute`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ indicativeAmountMinor: 1_000_00, currency: 'USD' })
+      .expect(403);
+
+    // Within the ceiling: succeeds (non-binding interest, Phase 4).
+    const withinCeiling = await request(http)
+      .post(`/agent/coverage-options/${listing.id}/execute`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ indicativeAmountMinor: 400_00, currency: 'USD' })
+      .expect(201);
+    expect(withinCeiling.body.interest.organisationId).toBeTruthy();
+  });
+
+  it('rejects an expired mandate', async () => {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const agentOrg = await identity.createOrganisation({
+      id: `org-expired-agent-${suffix}`,
+      legalName: `Expired Agent ${suffix}`,
+      kind: 'AI_AGENT',
+      jurisdiction: 'ZA',
+      principalOrganisationId: rootOrgId,
+    });
+    await identity.grantRole(agentOrg.id, 'RISK_ORIGINATOR');
+    const { keyId, secret, salt } = generateCredential();
+    await identity.createCredential({
+      id: `cred-${agentOrg.id}`,
+      keyId,
+      secretHash: hashSecret(secret, salt),
+      secretSalt: salt,
+      organisationId: agentOrg.id,
+      label: 'expired-agent',
+      scopes: ['*'],
+      subjectKind: 'AGENT',
+      expiresAt: null,
+    });
+    await identity.createMandate({
+      id: `mandate-${agentOrg.id}`,
+      agentOrganisationId: agentOrg.id,
+      principalOrganisationId: rootOrgId,
+      permittedActions: ['activity.submit'],
+      maxTransactionValueMinor: 1_000_00,
+      currency: 'USD',
+      expiresAt: new Date(Date.now() - 1000).toISOString(), // already expired
+    });
+    const risk = await createNode('RISK', 'agent-expired-mandate-risk');
+
+    await request(http)
+      .post('/agent/activity')
+      .set('Authorization', `Bearer ${keyId}.${secret}`)
+      .send({ riskId: risk, title: 'Should be rejected: expired mandate' })
+      .expect(403);
+  });
+
+  it('rejects an agent credential with no mandate at all', async () => {
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const agentOrg = await identity.createOrganisation({
+      id: `org-no-mandate-agent-${suffix}`,
+      legalName: `No Mandate Agent ${suffix}`,
+      kind: 'AI_AGENT',
+      jurisdiction: 'ZA',
+      principalOrganisationId: rootOrgId,
+    });
+    await identity.grantRole(agentOrg.id, 'RISK_ORIGINATOR');
+    const { keyId, secret, salt } = generateCredential();
+    await identity.createCredential({
+      id: `cred-${agentOrg.id}`,
+      keyId,
+      secretHash: hashSecret(secret, salt),
+      secretSalt: salt,
+      organisationId: agentOrg.id,
+      label: 'no-mandate-agent',
+      scopes: ['*'],
+      subjectKind: 'AGENT',
+      expiresAt: null,
+    });
+    const risk = await createNode('RISK', 'agent-no-mandate-risk');
+
+    await request(http)
+      .post('/agent/activity')
+      .set('Authorization', `Bearer ${keyId}.${secret}`)
+      .send({ riskId: risk, title: 'Should be rejected: no mandate' })
+      .expect(403);
+  });
+
+  it('does not gate a human caller behind mandate checks (assertAgentMayAct is a no-op for non-agents)', async () => {
+    const risk = await createNode('RISK', 'agent-human-caller-risk');
+    // rootToken is a SERVICE credential, not an AGENT — the same /agent/activity
+    // route must work for it exactly like a normal human/service integration.
+    await authed().post('/agent/activity').send({ riskId: risk, title: 'Human via agent route' }).expect(201);
+  });
+
+  it('requires a credential', async () => {
+    await request(http).post('/agent/activity').send({}).expect(401);
+  });
+});
+
 describe('Phase 10: Settlement', () => {
   it('initiates a bank-transfer settlement, computes the fee, and confirms via the Null provider', async () => {
     const response = await authed()

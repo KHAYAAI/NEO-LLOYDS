@@ -16,7 +16,7 @@ transferable and financeable — by machines as well as by people. Strategic HQ:
 Johannesburg; the architecture is globally deployable and jurisdiction-neutral
 at its core.
 
-## Status: Phases 1–10 delivered
+## Status: Phases 1–11 delivered
 
 | Phase | Scope | State |
 |---|---|---|
@@ -30,11 +30,15 @@ at its core.
 | 8 | Simulation & Digital Twin: runs a scenario forward from the risk graph — affected assets, exposed entities, estimated loss, correlated exposure, capital requirement, insured vs uninsured | **Delivered** |
 | 9 | Reinsurance: configurable quota share / excess of loss / aggregate layers over a cedant's own retained loss, as software abstractions, not regulated contracts | **Delivered** |
 | 10 | Settlement: `SettlementProvider` interface, fee engine, full transaction record — real infrastructure behind Phase 7's "settled" flag | **Delivered** |
-| 11 | AI Agent API | Specified, not built — `docs/roadmap.md` |
+| 11 | AI Agent API: authenticate → activity → assessment → indicative protection → coverage options → approval → permitted execution → settlement info, with a real mandate check on every step | **Delivered** |
+
+All eleven numbered phases from `docs/roadmap.md` are now built. What
+remains is the roadmap's "Continuous" section — jurisdiction modules and the
+broker/capital-provider portals — which is not phase-gated.
 
 Each phase is built vertically: domain logic, migrations where applicable,
 API, authn/authz, audit logging, error handling, docs and a passing test
-suite. See `docs/reports/phase-2.md` through `docs/reports/phase-10.md` for
+suite. See `docs/reports/phase-2.md` through `docs/reports/phase-11.md` for
 what each phase depends on externally before it can inform a real decision.
 Phase 4's report proves durability (a full workflow, a server restart,
 confirmation everything survived). Phase 5's report states, precisely, the
@@ -59,7 +63,13 @@ settlement provider exists — a Null provider that simulates instant success
 with an unmistakably fake reference — because no real bank, digital-money,
 or stablecoin integration is wired up yet; its live run confirms a fee
 computed to the cent and every field of the resulting transaction verified
-directly against PostgreSQL.
+directly against PostgreSQL. Phase 11's report is explicit that it adds no
+new domain logic at all — every step delegates to an existing service — and
+that its entire contribution is the first live call to a mandate-enforcement
+function (`assertAgentMayAct`) that has existed, unit-tested but never wired
+into a request path, since Phase 1; its live run proves a $600 execution
+attempt against a $500 mandate ceiling is rejected before the target listing
+is even looked up.
 
 ## Quick start
 

@@ -35,6 +35,8 @@ import { SettlementController } from './settlement/settlement.controller.js';
 import { SettlementService } from './settlement/settlement.service.js';
 import { SETTLEMENT_PROVIDER } from './settlement/tokens.js';
 import { createSettlementProvider } from './settlement/providers.js';
+import { AgentController } from './agent/agent.controller.js';
+import { AgentService } from './agent/agent.service.js';
 import {
   AUDIT_REPOSITORY,
   CAPITAL_REPOSITORY,
@@ -100,6 +102,7 @@ const CONTROLLERS = [
   SimulationController,
   ReinsuranceController,
   SettlementController,
+  AgentController,
 ];
 
 const SERVICES = [
@@ -116,6 +119,7 @@ const SERVICES = [
   SimulationService,
   ReinsuranceService,
   SettlementService,
+  AgentService,
   AuditService,
 ];
 

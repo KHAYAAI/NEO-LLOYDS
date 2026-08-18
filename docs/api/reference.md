@@ -216,6 +216,28 @@ confirmation. No cryptocurrency is hard-coded — `STABLECOIN` is a method a
 future provider could implement, not an integration with any specific
 chain or token.
 
+## AI Agent API (Phase 11)
+
+> Authenticate → submit activity → request assessment → indicative protection → coverage options → human approval where required → permitted execution → settlement information. Every step delegates to the same service a human caller uses; this phase's contribution is a real mandate check (`assertAgentMayAct`) before each one. See `docs/reports/phase-11.md`.
+
+| Method | Path | Scope | Notes |
+|---|---|---|---|
+| POST | `/agent/activity` | `agent:activity:submit` | Step 1. Submits a risk submission (delegates to `POST /submissions`), mandate-checked as action `activity.submit`. |
+| GET | `/agent/risks/:id/assessment` | `agent:assessment:read` | Step 2. The advisory AI analyst report (delegates to `GET /analyst/risks/:id`), action `risk.assess`. Never a decision. |
+| GET | `/agent/risks/:id/indicative-protection` | `agent:protection:read` | Step 3. The existing underwriting assessment plus whether it is currently clear to proceed, action `protection.indicative`. Response includes `indicative: true` and a `disclosure` field; never binding, creates nothing. |
+| GET | `/agent/coverage-options?riskClass=&jurisdiction=` | `agent:coverage:read` | Step 4. Open marketplace listings (delegates to `GET /marketplace/listings`-equivalent browse), action `coverage.browse`. Read-only. |
+| POST | `/agent/coverage-options/:listingId/execute` | `agent:coverage:execute` | Step 6 (permitted execution). `indicativeAmountMinor`/`currency`/optional `note`. Action `coverage.bind`, checked against `mandate.maxTransactionValueMinor` **before** the listing is touched. Delegates to the same non-binding `expressInterest` Phase 4 uses. |
+| GET | `/agent/settlement/:transactionId` | `agent:settlement:read` | Step 7. Read-only settlement transaction status (delegates to `GET /settlement/transactions/:id`), action `settlement.read`. |
+
+For a credential with `subjectKind: AGENT`, every route above requires an
+active, unexpired mandate (`POST /identity/mandates`) whose
+`permittedActions` includes the step's action name and, for `execute`,
+whose `maxTransactionValueMinor` covers the requested amount — enforced by
+`assertAgentMayAct` before the delegated service runs. For a human/service
+credential (`subjectKind !== AGENT`), the mandate check is a documented
+no-op and these routes behave identically to calling the underlying
+endpoint directly — there is no separate agent authorisation path.
+
 ## Errors
 
 Domain invariant violations return `422` with a machine-readable code:
