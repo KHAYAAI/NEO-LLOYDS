@@ -74,6 +74,7 @@ model Organisation {
   claims                 Claim[]
   claimPayouts           ClaimPayout[]
   simulationRuns         SimulationRun[]
+  reinsurancePrograms    ReinsuranceProgram[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -617,4 +618,70 @@ model SimulationRun {
   createdAt         DateTime               @default(now())
 
   @@index([organisationId, createdAt])
+}
+
+/// Phase 9 — Reinsurance. Configurable layers over a cedant's own retained
+/// loss, as software abstractions a program is configured with — not
+/// regulated reinsurance contracts. A program belongs to a cedant
+/// organisation (typically holding SYNDICATE role) and holds an ordered set
+/// of layers a loss is run through by `applyReinsuranceProgram`
+/// (packages/domain/src/reinsurance.ts).
+enum ReinsuranceLayerKind {
+  QUOTA_SHARE
+  EXCESS_OF_LOSS
+  AGGREGATE
+}
+
+model ReinsuranceProgram {
+  id             String              @id @default(uuid())
+  organisationId String
+  organisation   Organisation        @relation(fields: [organisationId], references: [id])
+  name           String
+  currency       String              @db.Char(3)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  layers    ReinsuranceLayer[]
+  cessions  ReinsuranceCession[]
+
+  @@index([organisationId])
+}
+
+model ReinsuranceLayer {
+  id        String               @id @default(uuid())
+  programId String
+  program   ReinsuranceProgram   @relation(fields: [programId], references: [id], onDelete: Cascade)
+  order     Int
+  kind      ReinsuranceLayerKind
+  /// QuotaShareParams | ExcessOfLossParams | AggregateParams (packages/domain/src/reinsurance.ts) as JSON.
+  params    Json
+  /// AGGREGATE layers only: cumulative gross/ceded consumed so far this
+  /// program period, carried forward between cessions. Zero and unused for
+  /// QUOTA_SHARE/EXCESS_OF_LOSS, which are stateless per loss.
+  aggregateConsumedGrossMinor BigInt @default(0)
+  aggregateConsumedCededMinor BigInt @default(0)
+
+  @@unique([programId, order])
+  @@index([programId])
+}
+
+model ReinsuranceCession {
+  id             String             @id @default(uuid())
+  programId      String
+  program        ReinsuranceProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  /// Optional link to the Claim this cession was computed against — a
+  /// program can also be exercised against a bare loss figure with no claim
+  /// (e.g. exploratory "what would this cede" calls), so this is nullable.
+  claimId        String?
+  grossLossMinor BigInt
+  totalCededMinor BigInt
+  netRetainedMinor BigInt
+  currency       String             @db.Char(3)
+  /// Full ProgramCessionResult (per-layer breakdown), stored as JSON for the
+  /// same read-mostly-analytical-snapshot reason SimulationRun.result is.
+  perLayer       Json
+  createdAt      DateTime           @default(now())
+
+  @@index([programId, createdAt])
+  @@index([claimId])
 }

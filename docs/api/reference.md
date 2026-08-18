@@ -181,6 +181,24 @@ Scenario kinds: `PORT_CLOSURE`, `SUPPLY_CHAIN_DISRUPTION`, `COMMODITY_SHOCK`,
 `basis: "INSUFFICIENT_DATA"` — not a priced figure), `correlatedExposure`,
 `capitalRequirement`, and `insuredVsUninsured`.
 
+## Reinsurance (Phase 9)
+
+> Configurable layers over a cedant's own retained loss — a software abstraction, not a regulated reinsurance contract. See `docs/reports/phase-9.md`.
+
+| Method | Path | Scope / roles | Notes |
+|---|---|---|---|
+| POST | `/reinsurance/programs` | `reinsurance:write` + `SYNDICATE` | Creates a program: `name`, `currency`, and an array of `{ order, params: { kind, ... } }` layers. `kind` is one of `QUOTA_SHARE` (`cededBps`, optional `perLossLimitMinor`), `EXCESS_OF_LOSS`, or `AGGREGATE` (both: `attachmentPointMinor`, `limitMinor`). |
+| GET | `/reinsurance/programs/:id` | `reinsurance:read` | |
+| GET | `/reinsurance/programs` | `reinsurance:read` | Lists the caller's organisation's programs. |
+| POST | `/reinsurance/programs/:id/cede` | `reinsurance:write` + `SYNDICATE` | **THE CESSION CALCULATION.** Runs `grossLossMinor`/`currency` through the program's layers in order and persists the ceded/retained split. Optional `claimId` links the cession to a Phase 7 claim for audit purposes only — nothing triggers this automatically when a claim's loss is calculated. `AGGREGATE` layers' running state updates and persists after every cession. |
+| GET | `/reinsurance/programs/:id/cessions` | `reinsurance:read` | Lists a program's cessions, most recent first. |
+
+Layers apply by `order`, not array position — layer 1 sees the full gross
+loss, layer 2 sees what layer 1 left retained, and so on. A cession's
+response includes `perLayer` (each layer's `ceded`/`retained`), `totalCeded`,
+and `netRetained`, with `totalCeded + netRetained` always equal to the
+gross loss exactly.
+
 ## Errors
 
 Domain invariant violations return `422` with a machine-readable code:

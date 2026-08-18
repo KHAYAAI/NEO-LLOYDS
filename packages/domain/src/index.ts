@@ -29,3 +29,4 @@ export * from './syndication.js';
 export * from './capital-ledger.js';
 export * from './claims.js';
 export * from './simulation.js';
+export * from './reinsurance.js';

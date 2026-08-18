@@ -12,6 +12,8 @@ import {
   type MarketRole,
   type Money,
   type Organisation,
+  type ReinsuranceLayerKind,
+  type ReinsuranceLayerParams,
   type RiskEdge,
   type RiskNode,
   type RiskSubmission,
@@ -27,6 +29,7 @@ import type {
   GraphRepository,
   IdentityRepository,
   MarketplaceRepository,
+  ReinsuranceRepository,
   SimulationRepository,
   StoredCapitalCommitment,
   StoredClaim,
@@ -34,6 +37,9 @@ import type {
   StoredCredential,
   StoredInterest,
   StoredListing,
+  StoredReinsuranceCession,
+  StoredReinsuranceLayer,
+  StoredReinsuranceProgram,
   StoredSimulationRun,
   StoredSyndication,
   SubmissionRepository,
@@ -1243,5 +1249,158 @@ export class PrismaSimulationRepository implements SimulationRepository {
       orderBy: { createdAt: 'desc' },
     });
     return rows.map((row) => this.toDomain(row));
+  }
+}
+
+@Injectable()
+export class PrismaReinsuranceRepository implements ReinsuranceRepository {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private layerToDomain(row: {
+    id: string;
+    programId: string;
+    order: number;
+    kind: string;
+    params: unknown;
+    aggregateConsumedGrossMinor: bigint;
+    aggregateConsumedCededMinor: bigint;
+  }): StoredReinsuranceLayer {
+    return {
+      id: row.id,
+      programId: row.programId,
+      order: row.order,
+      kind: row.kind as ReinsuranceLayerKind,
+      params: row.params as ReinsuranceLayerParams,
+      aggregateConsumedGrossMinor: Number(row.aggregateConsumedGrossMinor),
+      aggregateConsumedCededMinor: Number(row.aggregateConsumedCededMinor),
+    };
+  }
+
+  async createProgram(input: {
+    id: string;
+    organisationId: string;
+    name: string;
+    currency: string;
+    layers: readonly { id: string; order: number; kind: ReinsuranceLayerKind; params: ReinsuranceLayerParams }[];
+  }): Promise<StoredReinsuranceProgram> {
+    const row = await this.prisma.reinsuranceProgram.create({
+      data: {
+        id: input.id,
+        organisationId: input.organisationId,
+        name: input.name,
+        currency: input.currency,
+        layers: {
+          create: input.layers.map((l) => ({
+            id: l.id,
+            order: l.order,
+            kind: l.kind as never,
+            params: l.params as never,
+          })),
+        },
+      },
+      include: { layers: true },
+    });
+    return {
+      id: row.id,
+      organisationId: row.organisationId,
+      name: row.name,
+      currency: row.currency,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      layers: row.layers.map((l) => this.layerToDomain(l)),
+    };
+  }
+
+  async findProgram(id: string): Promise<StoredReinsuranceProgram | undefined> {
+    const row = await this.prisma.reinsuranceProgram.findUnique({
+      where: { id },
+      include: { layers: { orderBy: { order: 'asc' } } },
+    });
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      organisationId: row.organisationId,
+      name: row.name,
+      currency: row.currency,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      layers: row.layers.map((l) => this.layerToDomain(l)),
+    };
+  }
+
+  async listProgramsByOrganisation(organisationId: string): Promise<StoredReinsuranceProgram[]> {
+    const rows = await this.prisma.reinsuranceProgram.findMany({
+      where: { organisationId },
+      include: { layers: { orderBy: { order: 'asc' } } },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      organisationId: row.organisationId,
+      name: row.name,
+      currency: row.currency,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      layers: row.layers.map((l) => this.layerToDomain(l)),
+    }));
+  }
+
+  async updateLayerAggregateState(layerId: string, consumedGross: Money, consumedCeded: Money): Promise<void> {
+    await this.prisma.reinsuranceLayer.update({
+      where: { id: layerId },
+      data: {
+        aggregateConsumedGrossMinor: BigInt(consumedGross.amountMinor),
+        aggregateConsumedCededMinor: BigInt(consumedCeded.amountMinor),
+      },
+    });
+  }
+
+  async recordCession(input: {
+    id: string;
+    programId: string;
+    claimId: string | null;
+    grossLoss: Money;
+    totalCeded: Money;
+    netRetained: Money;
+    perLayer: StoredReinsuranceCession['perLayer'];
+  }): Promise<StoredReinsuranceCession> {
+    const row = await this.prisma.reinsuranceCession.create({
+      data: {
+        id: input.id,
+        programId: input.programId,
+        claimId: input.claimId,
+        grossLossMinor: BigInt(input.grossLoss.amountMinor),
+        totalCededMinor: BigInt(input.totalCeded.amountMinor),
+        netRetainedMinor: BigInt(input.netRetained.amountMinor),
+        currency: input.grossLoss.currency,
+        perLayer: input.perLayer as never,
+      },
+    });
+    return {
+      id: row.id,
+      programId: row.programId,
+      claimId: row.claimId,
+      grossLoss: money(Number(row.grossLossMinor), row.currency),
+      totalCeded: money(Number(row.totalCededMinor), row.currency),
+      netRetained: money(Number(row.netRetainedMinor), row.currency),
+      perLayer: row.perLayer as unknown as StoredReinsuranceCession['perLayer'],
+      createdAt: row.createdAt,
+    };
+  }
+
+  async listCessionsByProgram(programId: string): Promise<StoredReinsuranceCession[]> {
+    const rows = await this.prisma.reinsuranceCession.findMany({
+      where: { programId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      programId: row.programId,
+      claimId: row.claimId,
+      grossLoss: money(Number(row.grossLossMinor), row.currency),
+      totalCeded: money(Number(row.totalCededMinor), row.currency),
+      netRetained: money(Number(row.netRetainedMinor), row.currency),
+      perLayer: row.perLayer as unknown as StoredReinsuranceCession['perLayer'],
+      createdAt: row.createdAt,
+    }));
   }
 }

@@ -6,6 +6,9 @@ import type {
   MarketRole,
   Money,
   Organisation,
+  ProgramCessionResult,
+  ReinsuranceLayerKind,
+  ReinsuranceLayerParams,
   RiskEdge,
   RiskNode,
   RiskSubmission,
@@ -314,6 +317,67 @@ export interface SimulationRepository {
   listByOrganisation(organisationId: string): Promise<StoredSimulationRun[]>;
 }
 
+export interface StoredReinsuranceLayer {
+  id: string;
+  programId: string;
+  order: number;
+  kind: ReinsuranceLayerKind;
+  params: ReinsuranceLayerParams;
+  aggregateConsumedGrossMinor: number;
+  aggregateConsumedCededMinor: number;
+}
+
+export interface StoredReinsuranceProgram {
+  id: string;
+  organisationId: string;
+  name: string;
+  currency: string;
+  createdAt: Date;
+  updatedAt: Date;
+  layers: StoredReinsuranceLayer[];
+}
+
+export interface StoredReinsuranceCession {
+  id: string;
+  programId: string;
+  claimId: string | null;
+  grossLoss: Money;
+  totalCeded: Money;
+  netRetained: Money;
+  perLayer: ProgramCessionResult['perLayer'];
+  createdAt: Date;
+}
+
+export interface ReinsuranceRepository {
+  createProgram(input: {
+    id: string;
+    organisationId: string;
+    name: string;
+    currency: string;
+    layers: readonly { id: string; order: number; kind: ReinsuranceLayerKind; params: ReinsuranceLayerParams }[];
+  }): Promise<StoredReinsuranceProgram>;
+  findProgram(id: string): Promise<StoredReinsuranceProgram | undefined>;
+  listProgramsByOrganisation(organisationId: string): Promise<StoredReinsuranceProgram[]>;
+
+  /** Persists each AGGREGATE layer's post-cession running totals. A no-op for layers with no state to carry (QUOTA_SHARE/EXCESS_OF_LOSS). */
+  updateLayerAggregateState(
+    layerId: string,
+    consumedGross: Money,
+    consumedCeded: Money,
+  ): Promise<void>;
+
+  recordCession(input: {
+    id: string;
+    programId: string;
+    claimId: string | null;
+    grossLoss: Money;
+    totalCeded: Money;
+    netRetained: Money;
+    perLayer: ProgramCessionResult['perLayer'];
+  }): Promise<StoredReinsuranceCession>;
+  listCessionsByProgram(programId: string): Promise<StoredReinsuranceCession[]>;
+}
+
 export const IDENTITY_REPOSITORY = Symbol('IDENTITY_REPOSITORY');
 export const AUDIT_REPOSITORY = Symbol('AUDIT_REPOSITORY');
 export const GRAPH_REPOSITORY = Symbol('GRAPH_REPOSITORY');
@@ -324,6 +388,7 @@ export const SYNDICATION_REPOSITORY = Symbol('SYNDICATION_REPOSITORY');
 export const CAPITAL_REPOSITORY = Symbol('CAPITAL_REPOSITORY');
 export const CLAIMS_REPOSITORY = Symbol('CLAIMS_REPOSITORY');
 export const SIMULATION_REPOSITORY = Symbol('SIMULATION_REPOSITORY');
+export const REINSURANCE_REPOSITORY = Symbol('REINSURANCE_REPOSITORY');
 export const CLOCK = Symbol('CLOCK');
 
 export interface Clock {

@@ -138,9 +138,24 @@ happened.
 - See `docs/reports/phase-8.md` for a live run against the seeded MVP
   shipment scenario, verified end to end against PostgreSQL.
 
-## Phase 9 — Reinsurance
+## Phase 9 — Reinsurance — **DELIVERED**
+
 Configurable layers, quota share, excess of loss, aggregate protection — as
 software abstractions, not regulated contracts.
+
+- `applyReinsuranceProgram` (`packages/domain/src/reinsurance.ts`) runs a
+  gross loss through a program's layers in order, each layer receiving the
+  prior layer's retained remainder. `totalCeded + netRetained` always equals
+  the gross loss exactly, same invariant discipline as `allocateMoney`
+  (ADR-0005).
+- Stated plainly, not modelled around: real placements do not always stack
+  layers serially the way this does, and no reinsurer counterparty is
+  modelled — a program is the cedant's own configuration, not a bilateral
+  contract. See `docs/reports/phase-9.md`.
+- `AGGREGATE` layers carry running consumed-gross/consumed-ceded state
+  forward between cessions, persisted per layer — verified live with a
+  two-cession run proving the second cession correctly saw what the first
+  one had already consumed of the attachment/limit.
 
 ## Phase 10 — Settlement
 `SettlementProvider` interface with bank / digital-money / stablecoin adapters.

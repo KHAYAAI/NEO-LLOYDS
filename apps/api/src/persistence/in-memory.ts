@@ -7,6 +7,8 @@ import {
   type MarketRole,
   type Money,
   type Organisation,
+  type ReinsuranceLayerKind,
+  type ReinsuranceLayerParams,
   type RiskEdge,
   type RiskNode,
   type RiskSubmission,
@@ -23,6 +25,7 @@ import type {
   GraphRepository,
   IdentityRepository,
   MarketplaceRepository,
+  ReinsuranceRepository,
   SimulationRepository,
   StoredCapitalCommitment,
   StoredClaim,
@@ -30,6 +33,8 @@ import type {
   StoredCredential,
   StoredInterest,
   StoredListing,
+  StoredReinsuranceCession,
+  StoredReinsuranceProgram,
   StoredSimulationRun,
   StoredSyndication,
   SubmissionRepository,
@@ -635,6 +640,80 @@ export class InMemorySimulationRepository implements SimulationRepository {
     return [...this.runs.values()]
       .filter((r) => r.organisationId === organisationId)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+}
+
+export class InMemoryReinsuranceRepository implements ReinsuranceRepository {
+  private readonly programs = new Map<string, StoredReinsuranceProgram>();
+  private readonly cessions = new Map<string, StoredReinsuranceCession[]>();
+
+  async createProgram(input: {
+    id: string;
+    organisationId: string;
+    name: string;
+    currency: string;
+    layers: readonly { id: string; order: number; kind: ReinsuranceLayerKind; params: ReinsuranceLayerParams }[];
+  }): Promise<StoredReinsuranceProgram> {
+    const now = new Date();
+    const program: StoredReinsuranceProgram = {
+      id: input.id,
+      organisationId: input.organisationId,
+      name: input.name,
+      currency: input.currency,
+      createdAt: now,
+      updatedAt: now,
+      layers: input.layers.map((l) => ({
+        id: l.id,
+        programId: input.id,
+        order: l.order,
+        kind: l.kind,
+        params: l.params,
+        aggregateConsumedGrossMinor: 0,
+        aggregateConsumedCededMinor: 0,
+      })),
+    };
+    this.programs.set(program.id, program);
+    return program;
+  }
+
+  async findProgram(id: string): Promise<StoredReinsuranceProgram | undefined> {
+    return this.programs.get(id);
+  }
+
+  async listProgramsByOrganisation(organisationId: string): Promise<StoredReinsuranceProgram[]> {
+    return [...this.programs.values()].filter((p) => p.organisationId === organisationId);
+  }
+
+  async updateLayerAggregateState(layerId: string, consumedGross: Money, consumedCeded: Money): Promise<void> {
+    for (const program of this.programs.values()) {
+      const layer = program.layers.find((l) => l.id === layerId);
+      if (layer) {
+        layer.aggregateConsumedGrossMinor = consumedGross.amountMinor;
+        layer.aggregateConsumedCededMinor = consumedCeded.amountMinor;
+        program.updatedAt = new Date();
+        return;
+      }
+    }
+  }
+
+  async recordCession(input: {
+    id: string;
+    programId: string;
+    claimId: string | null;
+    grossLoss: Money;
+    totalCeded: Money;
+    netRetained: Money;
+    perLayer: StoredReinsuranceCession['perLayer'];
+  }): Promise<StoredReinsuranceCession> {
+    const cession: StoredReinsuranceCession = { ...input, createdAt: new Date() };
+    const existing = this.cessions.get(input.programId) ?? [];
+    existing.push(cession);
+    this.cessions.set(input.programId, existing);
+    return cession;
+  }
+
+  async listCessionsByProgram(programId: string): Promise<StoredReinsuranceCession[]> {
+    return this.cessions.get(programId) ?? [];
   }
 }
 

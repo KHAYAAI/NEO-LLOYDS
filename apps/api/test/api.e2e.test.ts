@@ -16,6 +16,7 @@ import {
   InMemorySubmissionRepository,
   InMemoryCapitalRepository,
   InMemoryClaimsRepository,
+  InMemoryReinsuranceRepository,
   InMemorySimulationRepository,
   InMemorySyndicationRepository,
   InMemoryUnderwritingRepository,
@@ -33,6 +34,7 @@ const syndicationRepo = new InMemorySyndicationRepository();
 const capitalRepo = new InMemoryCapitalRepository();
 const claimsRepo = new InMemoryClaimsRepository();
 const simulationRepo = new InMemorySimulationRepository();
+const reinsuranceRepo = new InMemoryReinsuranceRepository();
 
 let app: NestExpressApplication;
 let http: ReturnType<NestExpressApplication['getHttpServer']>;
@@ -84,6 +86,7 @@ beforeAll(async () => {
         capital: capitalRepo,
         claims: claimsRepo,
         simulation: simulationRepo,
+        reinsurance: reinsuranceRepo,
         clock: new SystemClock(),
       }),
     ],
@@ -106,6 +109,7 @@ beforeAll(async () => {
     'BROKER',
     'UNDERWRITER',
     'CLAIMS_ADMINISTRATOR',
+    'SYNDICATE',
   ]);
   rootOrgId = root.id;
   rootToken = root.token;
@@ -1608,5 +1612,176 @@ describe('Phase 7: claims — testing a bound allocation against a loss', () => 
       .post(`/claims/${second.id}/loss`)
       .send({ claimedLossMinor: 40_000_00, currency: 'USD' });
     expect(withinRemaining.status).toBe(201);
+  });
+});
+
+describe('Phase 9: Reinsurance', () => {
+  it('creates a program with a quota-share and an excess-of-loss layer, stacked in order', async () => {
+    const response = await authed()
+      .post('/reinsurance/programs')
+      .send({
+        name: 'Alpha Marine Program',
+        currency: 'USD',
+        layers: [
+          { order: 1, params: { kind: 'QUOTA_SHARE', cededBps: 2000 } },
+          {
+            order: 2,
+            params: { kind: 'EXCESS_OF_LOSS', attachmentPointMinor: 100_000_00, limitMinor: 500_000_00 },
+          },
+        ],
+      })
+      .expect(201);
+
+    const program = response.body.program;
+    expect(program.id).toBeTruthy();
+    expect(program.layers).toHaveLength(2);
+    expect(program.layers[0].kind).toBe('QUOTA_SHARE');
+    expect(program.layers[1].kind).toBe('EXCESS_OF_LOSS');
+  });
+
+  it('cedes a loss through the program layers and persists the cession', async () => {
+    const created = await authed()
+      .post('/reinsurance/programs')
+      .send({
+        name: 'Cession Test Program',
+        currency: 'USD',
+        layers: [{ order: 1, params: { kind: 'QUOTA_SHARE', cededBps: 3000 } }],
+      })
+      .expect(201);
+    const programId = created.body.program.id;
+
+    const cession = await authed()
+      .post(`/reinsurance/programs/${programId}/cede`)
+      .send({ grossLossMinor: 100_000_00, currency: 'USD' })
+      .expect(201);
+
+    expect(cession.body.cession.totalCeded).toEqual({ amountMinor: 30_000_00, currency: 'USD' });
+    expect(cession.body.cession.netRetained).toEqual({ amountMinor: 70_000_00, currency: 'USD' });
+
+    const fetched = await authed().get(`/reinsurance/programs/${programId}`).expect(200);
+    expect(fetched.body.program.id).toBe(programId);
+
+    const cessions = await authed().get(`/reinsurance/programs/${programId}/cessions`).expect(200);
+    expect(cessions.body.cessions).toHaveLength(1);
+  });
+
+  it('carries aggregate layer state across multiple cessions on the same program', async () => {
+    const created = await authed()
+      .post('/reinsurance/programs')
+      .send({
+        name: 'Aggregate Program',
+        currency: 'USD',
+        layers: [
+          {
+            order: 1,
+            params: { kind: 'AGGREGATE', attachmentPointMinor: 1_000_00, limitMinor: 500_00 },
+          },
+        ],
+      })
+      .expect(201);
+    const programId = created.body.program.id;
+
+    // First cession: cumulative loss 600, stays below the 1,000 attachment — nothing ceded.
+    const first = await authed()
+      .post(`/reinsurance/programs/${programId}/cede`)
+      .send({ grossLossMinor: 600_00, currency: 'USD' })
+      .expect(201);
+    expect(first.body.cession.totalCeded).toEqual({ amountMinor: 0, currency: 'USD' });
+
+    // Second cession: cumulative goes 600 -> 1200, of which 200 is above the attachment.
+    const second = await authed()
+      .post(`/reinsurance/programs/${programId}/cede`)
+      .send({ grossLossMinor: 600_00, currency: 'USD' })
+      .expect(201);
+    expect(second.body.cession.totalCeded).toEqual({ amountMinor: 200_00, currency: 'USD' });
+  });
+
+  it('links a cession to a claim id for audit purposes when provided', async () => {
+    const created = await authed()
+      .post('/reinsurance/programs')
+      .send({
+        name: 'Claim-Linked Program',
+        currency: 'USD',
+        layers: [{ order: 1, params: { kind: 'QUOTA_SHARE', cededBps: 1000 } }],
+      })
+      .expect(201);
+    const programId = created.body.program.id;
+
+    const cession = await authed()
+      .post(`/reinsurance/programs/${programId}/cede`)
+      .send({ grossLossMinor: 10_000_00, currency: 'USD', claimId: 'claim-fixture-id' })
+      .expect(201);
+    expect(cession.body.cession.claimId).toBe('claim-fixture-id');
+  });
+
+  it('lists programs for the organisation', async () => {
+    await authed()
+      .post('/reinsurance/programs')
+      .send({
+        name: 'Listable Program',
+        currency: 'USD',
+        layers: [{ order: 1, params: { kind: 'QUOTA_SHARE', cededBps: 1000 } }],
+      })
+      .expect(201);
+
+    const list = await authed().get('/reinsurance/programs').expect(200);
+    expect(Array.isArray(list.body.programs)).toBe(true);
+    expect(list.body.programs.length).toBeGreaterThan(0);
+  });
+
+  it('rejects an unknown layer kind at the validation layer', async () => {
+    await authed()
+      .post('/reinsurance/programs')
+      .send({
+        name: 'Bad Program',
+        currency: 'USD',
+        layers: [{ order: 1, params: { kind: 'SIDECAR' } }],
+      })
+      .expect(400);
+  });
+
+  it('rejects duplicate layer orders within a program', async () => {
+    const response = await authed().post('/reinsurance/programs').send({
+      name: 'Duplicate Orders',
+      currency: 'USD',
+      layers: [
+        { order: 1, params: { kind: 'QUOTA_SHARE', cededBps: 1000 } },
+        { order: 1, params: { kind: 'QUOTA_SHARE', cededBps: 2000 } },
+      ],
+    });
+    expect(response.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it('rejects a cession in a currency that does not match the program', async () => {
+    const created = await authed()
+      .post('/reinsurance/programs')
+      .send({
+        name: 'USD-only Program',
+        currency: 'USD',
+        layers: [{ order: 1, params: { kind: 'QUOTA_SHARE', cededBps: 1000 } }],
+      })
+      .expect(201);
+
+    const response = await authed()
+      .post(`/reinsurance/programs/${created.body.program.id}/cede`)
+      .send({ grossLossMinor: 10_000_00, currency: 'ZAR' });
+    expect(response.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it('requires a credential', async () => {
+    await request(http).post('/reinsurance/programs').send({}).expect(401);
+  });
+
+  it('rejects program creation from an organisation without the SYNDICATE role', async () => {
+    const nonSyndicate = await bootstrapOrganisation('Non-Syndicate Co', ['*'], ['RISK_ORIGINATOR']);
+    await request(http)
+      .post('/reinsurance/programs')
+      .set('Authorization', `Bearer ${nonSyndicate.token}`)
+      .send({
+        name: 'Should Fail',
+        currency: 'USD',
+        layers: [{ order: 1, params: { kind: 'QUOTA_SHARE', cededBps: 1000 } }],
+      })
+      .expect(403);
   });
 });
