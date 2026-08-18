@@ -37,10 +37,15 @@ roadmap's non-phase-gated "Continuous" section: **jurisdiction modules are
 delivered** for South Africa (first, ADR-0004), the United Kingdom, the
 European Union, the United States, Russia, China, Singapore, and Hong Kong
 (`packages/config`, published at `GET /jurisdictions`) — see
-`docs/reports/jurisdiction-modules.md`. Broker/capital-provider portals are
-not started: this repository has no frontend framework or design-system
-decision made anywhere in it yet, and that is a genuinely different kind of
-work from everything built so far.
+`docs/reports/jurisdiction-modules.md`. **A broker portal is delivered**
+(`apps/broker-portal`) — the first user-facing UI and the first
+frontend-stack decision in this repository (Next.js App Router + React +
+TypeScript, credential handling entirely server-side). It covers the
+risk-originator/broker journey end to end against the real API: submit →
+advance → AI analyst findings → score → underwriting clearance status →
+list to marketplace. Verified live with a browser driving the real,
+running API and PostgreSQL. Capital-provider, corporate, and admin portals
+are not started — see `apps/broker-portal/README.md`.
 
 Each phase is built vertically: domain logic, migrations where applicable,
 API, authn/authz, audit logging, error handling, docs and a passing test

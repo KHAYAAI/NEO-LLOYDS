@@ -210,7 +210,18 @@ corporate, admin), observability, and the security gaps listed in
   trail. Every numeric/graded field is an explicit illustrative
   placeholder, not real compliance advice — see
   `docs/reports/jurisdiction-modules.md`.
-- **Portals (broker, capital, corporate, admin) — not started.** A
-  genuinely different kind of work from everything built so far: this
-  repository has no frontend framework, build tooling, or design system
-  decision made anywhere in it. Deliberately not started implicitly.
+- **Broker portal — DELIVERED** (`apps/broker-portal`). The first
+  user-facing surface in this repository, and the first frontend-stack
+  decision made in it: Next.js App Router + React + TypeScript, chosen so
+  every API call — including the one holding the pasted credential — runs
+  server-side (Server Components/Actions), never in client-side JS. No
+  separate login system: it reuses the existing API-key model exactly
+  (security-model.md §2). Covers the risk-originator/broker journey
+  end-to-end against the real API: submit → advance through the submission
+  state machine → AI analyst findings (read-only) → deterministic scoring →
+  underwriting clearance status (read-only) → list to marketplace, gated by
+  the API's own clearance check. Verified live with a browser
+  (Playwright) driving the real, running API and Postgres, not a mock.
+  Capital-provider, corporate, and admin portals are not started — this
+  establishes the pattern for them, not a decision to build them yet. See
+  `apps/broker-portal/README.md`.
