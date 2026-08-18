@@ -157,10 +157,23 @@ software abstractions, not regulated contracts.
   two-cession run proving the second cession correctly saw what the first
   one had already consumed of the attachment/limit.
 
-## Phase 10 — Settlement
+## Phase 10 — Settlement — **DELIVERED**
+
 `SettlementProvider` interface with bank / digital-money / stablecoin adapters.
 No cryptocurrency hard-coded. Full transaction record and audit for every
 operation. Configurable fee engine.
+
+- This is where Phase 7's claims "settled" status — a bare state-machine
+  flag, no money moving — gets real transaction infrastructure: a
+  `SettlementTransaction` record, a fee calculation
+  (`fee + netAmount = grossAmount`, exactly), and a `SettlementProvider`
+  call.
+- Exactly one honest provider implementation exists today —
+  `NullSettlementProvider`, which simulates instant success and stamps an
+  unmistakably fake reference (`sim-bank_transfer-<id>`) — because no real
+  bank/digital-money/stablecoin integration exists yet. Same discipline as
+  the AI analyst provider and the SSO gap: an honest simulation beats a fake
+  real one. See `docs/reports/phase-10.md`.
 
 ## Phase 11 — AI Agent API
 Authenticate → submit activity → request assessment → indicative protection →

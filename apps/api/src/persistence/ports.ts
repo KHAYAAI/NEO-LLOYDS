@@ -12,6 +12,8 @@ import type {
   RiskEdge,
   RiskNode,
   RiskSubmission,
+  SettlementMethod,
+  SettlementStatus,
   SubmissionStatus,
   UnderwritingApproval,
   UnderwritingAssessment,
@@ -378,6 +380,42 @@ export interface ReinsuranceRepository {
   listCessionsByProgram(programId: string): Promise<StoredReinsuranceCession[]>;
 }
 
+export interface StoredSettlementTransaction {
+  id: string;
+  organisationId: string;
+  claimPayoutOrganisationId: string | null;
+  claimPayoutClaimId: string | null;
+  method: SettlementMethod;
+  status: SettlementStatus;
+  grossAmount: Money;
+  fee: Money;
+  netAmount: Money;
+  providerRef: string | null;
+  failureReason: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SettlementRepository {
+  create(input: {
+    id: string;
+    organisationId: string;
+    claimPayoutOrganisationId: string | null;
+    claimPayoutClaimId: string | null;
+    method: SettlementMethod;
+    grossAmount: Money;
+    fee: Money;
+    netAmount: Money;
+  }): Promise<StoredSettlementTransaction>;
+  find(id: string): Promise<StoredSettlementTransaction | undefined>;
+  listByOrganisation(organisationId: string): Promise<StoredSettlementTransaction[]>;
+  setStatus(
+    id: string,
+    status: SettlementStatus,
+    detail: { providerRef?: string; failureReason?: string },
+  ): Promise<StoredSettlementTransaction>;
+}
+
 export const IDENTITY_REPOSITORY = Symbol('IDENTITY_REPOSITORY');
 export const AUDIT_REPOSITORY = Symbol('AUDIT_REPOSITORY');
 export const GRAPH_REPOSITORY = Symbol('GRAPH_REPOSITORY');
@@ -389,6 +427,7 @@ export const CAPITAL_REPOSITORY = Symbol('CAPITAL_REPOSITORY');
 export const CLAIMS_REPOSITORY = Symbol('CLAIMS_REPOSITORY');
 export const SIMULATION_REPOSITORY = Symbol('SIMULATION_REPOSITORY');
 export const REINSURANCE_REPOSITORY = Symbol('REINSURANCE_REPOSITORY');
+export const SETTLEMENT_REPOSITORY = Symbol('SETTLEMENT_REPOSITORY');
 export const CLOCK = Symbol('CLOCK');
 
 export interface Clock {

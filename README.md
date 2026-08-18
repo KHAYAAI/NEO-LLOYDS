@@ -16,7 +16,7 @@ transferable and financeable — by machines as well as by people. Strategic HQ:
 Johannesburg; the architecture is globally deployable and jurisdiction-neutral
 at its core.
 
-## Status: Phases 1–9 delivered
+## Status: Phases 1–10 delivered
 
 | Phase | Scope | State |
 |---|---|---|
@@ -29,11 +29,12 @@ at its core.
 | 7 | Claims: incident → evidence → verification → coverage test → loss → review → approval → settlement, with a running-total check across every claim on a syndication | **Delivered** |
 | 8 | Simulation & Digital Twin: runs a scenario forward from the risk graph — affected assets, exposed entities, estimated loss, correlated exposure, capital requirement, insured vs uninsured | **Delivered** |
 | 9 | Reinsurance: configurable quota share / excess of loss / aggregate layers over a cedant's own retained loss, as software abstractions, not regulated contracts | **Delivered** |
-| 10–11 | Settlement, agent API | Specified, not built — `docs/roadmap.md` |
+| 10 | Settlement: `SettlementProvider` interface, fee engine, full transaction record — real infrastructure behind Phase 7's "settled" flag | **Delivered** |
+| 11 | AI Agent API | Specified, not built — `docs/roadmap.md` |
 
 Each phase is built vertically: domain logic, migrations where applicable,
 API, authn/authz, audit logging, error handling, docs and a passing test
-suite. See `docs/reports/phase-2.md` through `docs/reports/phase-9.md` for
+suite. See `docs/reports/phase-2.md` through `docs/reports/phase-10.md` for
 what each phase depends on externally before it can inform a real decision.
 Phase 4's report proves durability (a full workflow, a server restart,
 confirmation everything survived). Phase 5's report states, precisely, the
@@ -53,7 +54,12 @@ explicit that no reinsurer counterparty is modelled yet — a program is the
 cedant's own configuration for how a loss would split, not a bilateral
 contract — and proves an aggregate layer's running state genuinely persists
 across separate cessions, verified by querying the database directly between
-two live calls.
+two live calls. Phase 10's report is explicit that only one honest
+settlement provider exists — a Null provider that simulates instant success
+with an unmistakably fake reference — because no real bank, digital-money,
+or stablecoin integration is wired up yet; its live run confirms a fee
+computed to the cent and every field of the resulting transaction verified
+directly against PostgreSQL.
 
 ## Quick start
 

@@ -17,6 +17,7 @@ import {
   InMemoryCapitalRepository,
   InMemoryClaimsRepository,
   InMemoryReinsuranceRepository,
+  InMemorySettlementRepository,
   InMemorySimulationRepository,
   InMemorySyndicationRepository,
   InMemoryUnderwritingRepository,
@@ -35,6 +36,7 @@ const capitalRepo = new InMemoryCapitalRepository();
 const claimsRepo = new InMemoryClaimsRepository();
 const simulationRepo = new InMemorySimulationRepository();
 const reinsuranceRepo = new InMemoryReinsuranceRepository();
+const settlementRepo = new InMemorySettlementRepository();
 
 let app: NestExpressApplication;
 let http: ReturnType<NestExpressApplication['getHttpServer']>;
@@ -87,6 +89,7 @@ beforeAll(async () => {
         claims: claimsRepo,
         simulation: simulationRepo,
         reinsurance: reinsuranceRepo,
+        settlement: settlementRepo,
         clock: new SystemClock(),
       }),
     ],
@@ -1782,6 +1785,108 @@ describe('Phase 9: Reinsurance', () => {
         currency: 'USD',
         layers: [{ order: 1, params: { kind: 'QUOTA_SHARE', cededBps: 1000 } }],
       })
+      .expect(403);
+  });
+});
+
+describe('Phase 10: Settlement', () => {
+  it('initiates a bank-transfer settlement, computes the fee, and confirms via the Null provider', async () => {
+    const response = await authed()
+      .post('/settlement/transactions')
+      .send({ method: 'BANK_TRANSFER', grossAmountMinor: 100_000_00, currency: 'USD' })
+      .expect(201);
+
+    const transaction = response.body.transaction;
+    expect(transaction.id).toBeTruthy();
+    expect(transaction.status).toBe('CONFIRMED');
+    expect(transaction.method).toBe('BANK_TRANSFER');
+    // Default fee: $0.50 flat + 0.25% of $100,000 = $0.50 + $250 = $250.50.
+    expect(transaction.fee).toEqual({ amountMinor: 250_50, currency: 'USD' });
+    expect(transaction.netAmount).toEqual({ amountMinor: 99_749_50, currency: 'USD' });
+    expect(transaction.fee.amountMinor + transaction.netAmount.amountMinor).toBe(
+      transaction.grossAmount.amountMinor,
+    );
+    expect(transaction.providerRef).toMatch(/^sim-bank_transfer-/);
+  });
+
+  it('accepts a custom fee configuration', async () => {
+    const response = await authed()
+      .post('/settlement/transactions')
+      .send({
+        method: 'DIGITAL_MONEY',
+        grossAmountMinor: 10_000_00,
+        currency: 'USD',
+        feeFlatMinor: 0,
+        feeBps: 100, // 1%
+      })
+      .expect(201);
+    expect(response.body.transaction.fee).toEqual({ amountMinor: 10_000, currency: 'USD' });
+  });
+
+  it('supports STABLECOIN as a settlement method without hard-coding any specific coin or chain', async () => {
+    const response = await authed()
+      .post('/settlement/transactions')
+      .send({ method: 'STABLECOIN', grossAmountMinor: 5_000_00, currency: 'USD' })
+      .expect(201);
+    expect(response.body.transaction.method).toBe('STABLECOIN');
+    expect(response.body.transaction.providerRef).toMatch(/^sim-stablecoin-/);
+  });
+
+  it('retrieves a settlement transaction by id', async () => {
+    const created = await authed()
+      .post('/settlement/transactions')
+      .send({ method: 'BANK_TRANSFER', grossAmountMinor: 1_000_00, currency: 'USD' })
+      .expect(201);
+
+    const fetched = await authed()
+      .get(`/settlement/transactions/${created.body.transaction.id}`)
+      .expect(200);
+    expect(fetched.body.transaction.id).toBe(created.body.transaction.id);
+  });
+
+  it('lists settlement transactions for the organisation', async () => {
+    await authed()
+      .post('/settlement/transactions')
+      .send({ method: 'BANK_TRANSFER', grossAmountMinor: 500_00, currency: 'USD' })
+      .expect(201);
+
+    const list = await authed().get('/settlement/transactions').expect(200);
+    expect(Array.isArray(list.body.transactions)).toBe(true);
+    expect(list.body.transactions.length).toBeGreaterThan(0);
+  });
+
+  it('links a settlement to a claim payout when provided', async () => {
+    const response = await authed()
+      .post('/settlement/transactions')
+      .send({
+        method: 'BANK_TRANSFER',
+        grossAmountMinor: 1_000_00,
+        currency: 'USD',
+        claimPayoutClaimId: 'claim-fixture-id',
+        claimPayoutOrganisationId: 'org-fixture-id',
+      })
+      .expect(201);
+    expect(response.body.transaction.claimPayoutClaimId).toBe('claim-fixture-id');
+    expect(response.body.transaction.claimPayoutOrganisationId).toBe('org-fixture-id');
+  });
+
+  it('rejects an unknown settlement method at the validation layer', async () => {
+    await authed()
+      .post('/settlement/transactions')
+      .send({ method: 'CASH_IN_AN_ENVELOPE', grossAmountMinor: 1_000_00, currency: 'USD' })
+      .expect(400);
+  });
+
+  it('requires a credential', async () => {
+    await request(http).post('/settlement/transactions').send({}).expect(401);
+  });
+
+  it('rejects settlement initiation from an organisation without an authorised role', async () => {
+    const unauthorised = await bootstrapOrganisation('No Settlement Role Co', ['*'], ['RISK_ORIGINATOR']);
+    await request(http)
+      .post('/settlement/transactions')
+      .set('Authorization', `Bearer ${unauthorised.token}`)
+      .send({ method: 'BANK_TRANSFER', grossAmountMinor: 1_000_00, currency: 'USD' })
       .expect(403);
   });
 });

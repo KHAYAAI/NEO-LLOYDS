@@ -199,6 +199,23 @@ response includes `perLayer` (each layer's `ceded`/`retained`), `totalCeded`,
 and `netRetained`, with `totalCeded + netRetained` always equal to the
 gross loss exactly.
 
+## Settlement (Phase 10)
+
+> Real transaction infrastructure behind Phase 7's "settled" flag — a fee engine and a `SettlementProvider` call. Only one honest provider exists today: a Null provider that simulates instant success. See `docs/reports/phase-10.md`.
+
+| Method | Path | Scope / roles | Notes |
+|---|---|---|---|
+| POST | `/settlement/transactions` | `settlement:write` + `CLAIMS_ADMINISTRATOR`/`SETTLEMENT_PROVIDER` | Initiates a settlement: `method` (`BANK_TRANSFER`, `DIGITAL_MONEY`, or `STABLECOIN`), `grossAmountMinor`, `currency`, optional `claimPayoutClaimId`/`claimPayoutOrganisationId` link, optional `feeFlatMinor`/`feeBps` override (default: $0.50 flat + 0.25%). Computes the fee, records the transaction, and submits it to the configured provider synchronously — the response reflects the final `CONFIRMED`/`FAILED` status. |
+| GET | `/settlement/transactions/:id` | `settlement:read` | |
+| GET | `/settlement/transactions` | `settlement:read` | Lists the caller's organisation's transactions, most recent first. |
+
+A transaction's `fee + netAmount` always equals `grossAmount` exactly.
+`providerRef` from the current Null provider is always prefixed `sim-` (e.g.
+`sim-bank_transfer-<id>`) so it can never be mistaken for a real provider
+confirmation. No cryptocurrency is hard-coded — `STABLECOIN` is a method a
+future provider could implement, not an integration with any specific
+chain or token.
+
 ## Errors
 
 Domain invariant violations return `422` with a machine-readable code:

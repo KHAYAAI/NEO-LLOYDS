@@ -9,6 +9,8 @@ import {
   type Organisation,
   type ReinsuranceLayerKind,
   type ReinsuranceLayerParams,
+  type SettlementMethod,
+  type SettlementStatus,
   type RiskEdge,
   type RiskNode,
   type RiskSubmission,
@@ -35,8 +37,10 @@ import type {
   StoredListing,
   StoredReinsuranceCession,
   StoredReinsuranceProgram,
+  StoredSettlementTransaction,
   StoredSimulationRun,
   StoredSyndication,
+  SettlementRepository,
   SubmissionRepository,
   SyndicationRepository,
   UnderwritingRepository,
@@ -714,6 +718,61 @@ export class InMemoryReinsuranceRepository implements ReinsuranceRepository {
 
   async listCessionsByProgram(programId: string): Promise<StoredReinsuranceCession[]> {
     return this.cessions.get(programId) ?? [];
+  }
+}
+
+export class InMemorySettlementRepository implements SettlementRepository {
+  private readonly transactions = new Map<string, StoredSettlementTransaction>();
+
+  async create(input: {
+    id: string;
+    organisationId: string;
+    claimPayoutOrganisationId: string | null;
+    claimPayoutClaimId: string | null;
+    method: SettlementMethod;
+    grossAmount: Money;
+    fee: Money;
+    netAmount: Money;
+  }): Promise<StoredSettlementTransaction> {
+    const now = new Date();
+    const transaction: StoredSettlementTransaction = {
+      ...input,
+      status: 'PENDING',
+      providerRef: null,
+      failureReason: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.transactions.set(transaction.id, transaction);
+    return transaction;
+  }
+
+  async find(id: string): Promise<StoredSettlementTransaction | undefined> {
+    return this.transactions.get(id);
+  }
+
+  async listByOrganisation(organisationId: string): Promise<StoredSettlementTransaction[]> {
+    return [...this.transactions.values()]
+      .filter((t) => t.organisationId === organisationId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  async setStatus(
+    id: string,
+    status: SettlementStatus,
+    detail: { providerRef?: string; failureReason?: string },
+  ): Promise<StoredSettlementTransaction> {
+    const existing = this.transactions.get(id);
+    if (!existing) throw new Error(`Unknown settlement transaction: ${id}`);
+    const updated: StoredSettlementTransaction = {
+      ...existing,
+      status,
+      providerRef: detail.providerRef ?? existing.providerRef,
+      failureReason: detail.failureReason ?? existing.failureReason,
+      updatedAt: new Date(),
+    };
+    this.transactions.set(id, updated);
+    return updated;
   }
 }
 

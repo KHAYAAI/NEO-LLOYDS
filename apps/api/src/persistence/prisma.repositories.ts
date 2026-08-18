@@ -14,6 +14,8 @@ import {
   type Organisation,
   type ReinsuranceLayerKind,
   type ReinsuranceLayerParams,
+  type SettlementMethod,
+  type SettlementStatus,
   type RiskEdge,
   type RiskNode,
   type RiskSubmission,
@@ -40,8 +42,10 @@ import type {
   StoredReinsuranceCession,
   StoredReinsuranceLayer,
   StoredReinsuranceProgram,
+  StoredSettlementTransaction,
   StoredSimulationRun,
   StoredSyndication,
+  SettlementRepository,
   SubmissionRepository,
   SyndicationRepository,
   UnderwritingRepository,
@@ -1402,5 +1406,98 @@ export class PrismaReinsuranceRepository implements ReinsuranceRepository {
       perLayer: row.perLayer as unknown as StoredReinsuranceCession['perLayer'],
       createdAt: row.createdAt,
     }));
+  }
+}
+
+@Injectable()
+export class PrismaSettlementRepository implements SettlementRepository {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  private toDomain(row: {
+    id: string;
+    organisationId: string;
+    claimPayoutOrganisationId: string | null;
+    claimPayoutClaimId: string | null;
+    method: string;
+    status: string;
+    grossAmountMinor: bigint;
+    feeMinor: bigint;
+    netAmountMinor: bigint;
+    currency: string;
+    providerRef: string | null;
+    failureReason: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }): StoredSettlementTransaction {
+    return {
+      id: row.id,
+      organisationId: row.organisationId,
+      claimPayoutOrganisationId: row.claimPayoutOrganisationId,
+      claimPayoutClaimId: row.claimPayoutClaimId,
+      method: row.method as SettlementMethod,
+      status: row.status as SettlementStatus,
+      grossAmount: money(Number(row.grossAmountMinor), row.currency),
+      fee: money(Number(row.feeMinor), row.currency),
+      netAmount: money(Number(row.netAmountMinor), row.currency),
+      providerRef: row.providerRef,
+      failureReason: row.failureReason,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  async create(input: {
+    id: string;
+    organisationId: string;
+    claimPayoutOrganisationId: string | null;
+    claimPayoutClaimId: string | null;
+    method: SettlementMethod;
+    grossAmount: Money;
+    fee: Money;
+    netAmount: Money;
+  }): Promise<StoredSettlementTransaction> {
+    const row = await this.prisma.settlementTransaction.create({
+      data: {
+        id: input.id,
+        organisationId: input.organisationId,
+        claimPayoutOrganisationId: input.claimPayoutOrganisationId,
+        claimPayoutClaimId: input.claimPayoutClaimId,
+        method: input.method as never,
+        grossAmountMinor: BigInt(input.grossAmount.amountMinor),
+        feeMinor: BigInt(input.fee.amountMinor),
+        netAmountMinor: BigInt(input.netAmount.amountMinor),
+        currency: input.grossAmount.currency,
+      },
+    });
+    return this.toDomain(row);
+  }
+
+  async find(id: string): Promise<StoredSettlementTransaction | undefined> {
+    const row = await this.prisma.settlementTransaction.findUnique({ where: { id } });
+    return row ? this.toDomain(row) : undefined;
+  }
+
+  async listByOrganisation(organisationId: string): Promise<StoredSettlementTransaction[]> {
+    const rows = await this.prisma.settlementTransaction.findMany({
+      where: { organisationId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((row) => this.toDomain(row));
+  }
+
+  async setStatus(
+    id: string,
+    status: SettlementStatus,
+    detail: { providerRef?: string; failureReason?: string },
+  ): Promise<StoredSettlementTransaction> {
+    const row = await this.prisma.settlementTransaction.update({
+      where: { id },
+      data: {
+        status: status as never,
+        ...(detail.providerRef !== undefined ? { providerRef: detail.providerRef } : {}),
+        ...(detail.failureReason !== undefined ? { failureReason: detail.failureReason } : {}),
+      },
+    });
+    return this.toDomain(row);
   }
 }

@@ -75,6 +75,7 @@ model Organisation {
   claimPayouts           ClaimPayout[]
   simulationRuns         SimulationRun[]
   reinsurancePrograms    ReinsuranceProgram[]
+  settlementTransactions SettlementTransaction[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -684,4 +685,50 @@ model ReinsuranceCession {
 
   @@index([programId, createdAt])
   @@index([claimId])
+}
+
+/// Phase 10 — Settlement. This is where Phase 7's claims "settled" status —
+/// a bare state-machine flag, no money moving — gets real transaction
+/// infrastructure behind it: a full record for every settlement attempt,
+/// regardless of provider. No cryptocurrency is hard-coded — STABLECOIN is
+/// one of three settlement *methods* a program can request, not an
+/// implementation of any specific chain.
+enum SettlementMethodKind {
+  BANK_TRANSFER
+  DIGITAL_MONEY
+  STABLECOIN
+}
+
+enum SettlementTransactionStatus {
+  PENDING
+  SUBMITTED
+  CONFIRMED
+  FAILED
+}
+
+model SettlementTransaction {
+  id              String                      @id @default(uuid())
+  organisationId  String
+  organisation    Organisation                @relation(fields: [organisationId], references: [id])
+  /// Optional link to the ClaimPayout this settlement is discharging — a
+  /// settlement can also be requested standalone (e.g. a reinsurance
+  /// recovery, a manual correction), so this is nullable.
+  claimPayoutOrganisationId String?
+  claimPayoutClaimId        String?
+  method          SettlementMethodKind
+  status          SettlementTransactionStatus @default(PENDING)
+  grossAmountMinor BigInt
+  feeMinor         BigInt
+  netAmountMinor   BigInt
+  currency         String                     @db.Char(3)
+  /// The provider's own reference for this transaction, once submitted —
+  /// null until SUBMITTED. Format is provider-specific and opaque here.
+  providerRef      String?
+  /// Human-readable detail on a FAILED transaction, if the provider gave one.
+  failureReason    String?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+
+  @@index([organisationId, createdAt])
+  @@index([claimPayoutClaimId])
 }

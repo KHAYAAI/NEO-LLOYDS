@@ -31,6 +31,10 @@ import { SimulationController } from './simulation/simulation.controller.js';
 import { SimulationService } from './simulation/simulation.service.js';
 import { ReinsuranceController } from './reinsurance/reinsurance.controller.js';
 import { ReinsuranceService } from './reinsurance/reinsurance.service.js';
+import { SettlementController } from './settlement/settlement.controller.js';
+import { SettlementService } from './settlement/settlement.service.js';
+import { SETTLEMENT_PROVIDER } from './settlement/tokens.js';
+import { createSettlementProvider } from './settlement/providers.js';
 import {
   AUDIT_REPOSITORY,
   CAPITAL_REPOSITORY,
@@ -40,6 +44,7 @@ import {
   IDENTITY_REPOSITORY,
   MARKETPLACE_REPOSITORY,
   REINSURANCE_REPOSITORY,
+  SETTLEMENT_REPOSITORY,
   SIMULATION_REPOSITORY,
   SUBMISSION_REPOSITORY,
   SYNDICATION_REPOSITORY,
@@ -54,6 +59,7 @@ import {
   PrismaMarketplaceRepository,
   PrismaReinsuranceRepository,
   PrismaService,
+  PrismaSettlementRepository,
   PrismaSimulationRepository,
   PrismaSubmissionRepository,
   PrismaSyndicationRepository,
@@ -93,6 +99,7 @@ const CONTROLLERS = [
   ClaimsController,
   SimulationController,
   ReinsuranceController,
+  SettlementController,
 ];
 
 const SERVICES = [
@@ -108,6 +115,7 @@ const SERVICES = [
   ClaimsService,
   SimulationService,
   ReinsuranceService,
+  SettlementService,
   AuditService,
 ];
 
@@ -129,8 +137,10 @@ export class AppModule {
     claims: unknown;
     simulation: unknown;
     reinsurance: unknown;
+    settlement: unknown;
     clock: unknown;
     analystProvider?: unknown;
+    settlementProvider?: unknown;
     extra?: unknown[];
   }): DynamicModule {
     return {
@@ -151,10 +161,15 @@ export class AppModule {
         { provide: CLAIMS_REPOSITORY, useValue: providers.claims },
         { provide: SIMULATION_REPOSITORY, useValue: providers.simulation },
         { provide: REINSURANCE_REPOSITORY, useValue: providers.reinsurance },
+        { provide: SETTLEMENT_REPOSITORY, useValue: providers.settlement },
         { provide: CLOCK, useValue: providers.clock },
         {
           provide: ANALYST_PROVIDER,
           useValue: providers.analystProvider ?? new NullAnalystProvider(),
+        },
+        {
+          provide: SETTLEMENT_PROVIDER,
+          useValue: providers.settlementProvider ?? createSettlementProvider(),
         },
         { provide: APP_GUARD, useClass: ApiCredentialGuard },
         ...((providers.extra ?? []) as never[]),
@@ -183,8 +198,10 @@ export class AppModule {
         { provide: CLAIMS_REPOSITORY, useClass: PrismaClaimsRepository },
         { provide: SIMULATION_REPOSITORY, useClass: PrismaSimulationRepository },
         { provide: REINSURANCE_REPOSITORY, useClass: PrismaReinsuranceRepository },
+        { provide: SETTLEMENT_REPOSITORY, useClass: PrismaSettlementRepository },
         { provide: CLOCK, useClass: SystemClock },
         { provide: ANALYST_PROVIDER, useFactory: createAnalystProvider },
+        { provide: SETTLEMENT_PROVIDER, useFactory: createSettlementProvider },
         { provide: APP_GUARD, useClass: ApiCredentialGuard },
       ],
     };
