@@ -7,6 +7,7 @@ import {
   type MarketRole,
   type Organisation,
 } from '@neo-lloyds/domain';
+import { isConfiguredJurisdiction } from '@neo-lloyds/config';
 import {
   IDENTITY_REPOSITORY,
   type IdentityRepository,
@@ -70,13 +71,23 @@ export class IdentityService {
       ...input,
     });
 
+    // Registration is never blocked by an unconfigured jurisdiction — ADR-0004
+    // requires *a* jurisdiction, not a *configured* one, and this platform
+    // must stay globally deployable. But the gap is worth recording, not
+    // hidden: an organisation in a jurisdiction with no module (GET
+    // /jurisdictions) has no published data-residency/KYC-AML/cross-border
+    // guidance behind it yet.
+    const jurisdictionConfigured = isConfiguredJurisdiction(input.jurisdiction);
+
     await this.audit.record({
       ctx,
       action: 'identity.organisation.create',
       subjectType: 'Organisation',
       subjectId: organisation.id,
       decision: 'ALLOWED',
-      reason: 'Organisation registered',
+      reason: jurisdictionConfigured
+        ? 'Organisation registered'
+        : `Organisation registered in jurisdiction "${input.jurisdiction}", which has no configured jurisdiction module yet`,
       after: organisation,
     });
 

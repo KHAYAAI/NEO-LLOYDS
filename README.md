@@ -32,9 +32,15 @@ at its core.
 | 10 | Settlement: `SettlementProvider` interface, fee engine, full transaction record — real infrastructure behind Phase 7's "settled" flag | **Delivered** |
 | 11 | AI Agent API: authenticate → activity → assessment → indicative protection → coverage options → approval → permitted execution → settlement info, with a real mandate check on every step | **Delivered** |
 
-All eleven numbered phases from `docs/roadmap.md` are now built. What
-remains is the roadmap's "Continuous" section — jurisdiction modules and the
-broker/capital-provider portals — which is not phase-gated.
+All eleven numbered phases from `docs/roadmap.md` are now built. Of the
+roadmap's non-phase-gated "Continuous" section: **jurisdiction modules are
+delivered** for South Africa (first, ADR-0004), the United Kingdom, the
+European Union, the United States, Russia, China, Singapore, and Hong Kong
+(`packages/config`, published at `GET /jurisdictions`) — see
+`docs/reports/jurisdiction-modules.md`. Broker/capital-provider portals are
+not started: this repository has no frontend framework or design-system
+decision made anywhere in it yet, and that is a genuinely different kind of
+work from everything built so far.
 
 Each phase is built vertically: domain logic, migrations where applicable,
 API, authn/authz, audit logging, error handling, docs and a passing test

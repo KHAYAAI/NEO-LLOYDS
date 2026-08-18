@@ -178,6 +178,26 @@ describe('public surface', () => {
       ),
     ).toBe(true);
   });
+
+  it('publishes every configured jurisdiction module (ADR-0004)', async () => {
+    const response = await request(http).get('/jurisdictions').expect(200);
+    const codes = response.body.jurisdictions.map((j: { code: string }) => j.code);
+    expect(new Set(codes)).toEqual(new Set(['ZA', 'GB', 'EU', 'US', 'RU', 'CN', 'SG', 'HK']));
+    expect(response.body.supportedCodes[0]).toBe('ZA');
+    for (const jurisdiction of response.body.jurisdictions) {
+      expect(jurisdiction.disclaimer).toContain('not legal advice');
+    }
+  });
+
+  it('retrieves a single jurisdiction module by code', async () => {
+    const response = await request(http).get('/jurisdictions/ZA').expect(200);
+    expect(response.body.name).toBe('South Africa');
+    expect(response.body.regulator.name).toContain('FSCA');
+  });
+
+  it('returns 404 for an unconfigured jurisdiction code', async () => {
+    await request(http).get('/jurisdictions/XX').expect(404);
+  });
 });
 
 describe('hardening (docs/security-model.md §9)', () => {
@@ -545,6 +565,18 @@ describe('Phase 8: Simulation & Digital Twin', () => {
 });
 
 describe('identity and governance', () => {
+  it('still registers an organisation in an unconfigured jurisdiction, but flags the gap in the audit trail', async () => {
+    const response = await authed()
+      .post('/identity/organisations')
+      .send({ legalName: 'No Module Yet Ltd', kind: 'COMPANY', jurisdiction: 'BR' }) // Brazil: no jurisdiction module configured
+      .expect(201);
+    expect(response.body.organisation.jurisdiction).toBe('BR');
+
+    const record = audit.records.at(-1);
+    expect(record?.action).toBe('identity.organisation.create');
+    expect(record?.reason).toContain('no configured jurisdiction module');
+  });
+
   it('refuses an agent organisation with no principal', async () => {
     const response = await authed()
       .post('/identity/organisations')

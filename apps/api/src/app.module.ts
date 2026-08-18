@@ -37,6 +37,7 @@ import { SETTLEMENT_PROVIDER } from './settlement/tokens.js';
 import { createSettlementProvider } from './settlement/providers.js';
 import { AgentController } from './agent/agent.controller.js';
 import { AgentService } from './agent/agent.service.js';
+import { JurisdictionController } from './jurisdiction/jurisdiction.controller.js';
 import {
   AUDIT_REPOSITORY,
   CAPITAL_REPOSITORY,
@@ -89,6 +90,7 @@ const THROTTLER_IMPORTS = [
 const CONTROLLERS = [
   HealthController,
   OntologyController,
+  JurisdictionController,
   IdentityController,
   GraphController,
   ScoringController,

@@ -29,6 +29,8 @@ which may read across tenants (every such read is audited) but never write.
 | GET | `/health` | Liveness, phase, ontology version |
 | GET | `/ontology` | The machine-readable ontology the server validates against |
 | GET | `/ontology/version` | Version and counts |
+| GET | `/jurisdictions` | Every configured jurisdiction module (ADR-0004) — see `docs/reports/jurisdiction-modules.md`. Illustrative regulatory summaries only, not legal advice. |
+| GET | `/jurisdictions/:code` | A single module by ISO-3166-1 alpha-2 code (or `EU`). `404` if unconfigured — an organisation may still register in that jurisdiction (ADR-0004 requires *a* jurisdiction, not a *configured* one); the audit trail notes the gap. |
 
 ## Identity
 

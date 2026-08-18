@@ -199,3 +199,18 @@ settlement information. Mandate enforcement throughout.
 Jurisdiction modules (ZA first, then UK/EU/US), portals (broker, capital,
 corporate, admin), observability, and the security gaps listed in
 `docs/security-model.md` §8.
+
+- **Jurisdiction modules — DELIVERED for ZA, GB, EU, US, RU, CN, SG, HK.**
+  New standalone package `packages/config`, depending on nothing and
+  depended on by nothing in `packages/domain` — the core stays exactly as
+  jurisdiction-neutral as ADR-0004 requires. Published at `GET
+  /jurisdictions` / `GET /jurisdictions/:code`. Registering an organisation
+  in an unconfigured jurisdiction is never blocked (ADR-0004 requires *a*
+  jurisdiction, not a *configured* one) but is now flagged in the audit
+  trail. Every numeric/graded field is an explicit illustrative
+  placeholder, not real compliance advice — see
+  `docs/reports/jurisdiction-modules.md`.
+- **Portals (broker, capital, corporate, admin) — not started.** A
+  genuinely different kind of work from everything built so far: this
+  repository has no frontend framework, build tooling, or design system
+  decision made anywhere in it. Deliberately not started implicitly.

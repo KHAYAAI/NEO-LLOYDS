@@ -117,9 +117,14 @@ it — ADR-0003.
 
 The core domain is jurisdiction-neutral. Jurisdiction-specific rules (capital
 treatment, KYC/AML, sanctions, tax, data residency, cross-border) load as modules
-under `packages/config/jurisdictions/*`. South Africa is the first module because
+in `packages/config`. South Africa is the first module because
 the strategic HQ is Johannesburg — it is *not* the default and no South African
 assumption may be hard-coded into the core. ADR-0004.
+
+**Delivered:** ZA, GB, EU, US, RU, CN, SG, HK — published at
+`GET /jurisdictions`. Every module is an illustrative regulatory summary
+(real regulator names and regime shape; placeholder numeric/graded
+judgements), not legal advice — see `docs/reports/jurisdiction-modules.md`.
 
 ## 7. Tradeoffs taken
 
