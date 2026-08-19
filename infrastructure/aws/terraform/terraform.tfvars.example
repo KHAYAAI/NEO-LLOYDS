@@ -1,0 +1,31 @@
+# Copy to terraform.tfvars and fill in -- terraform.tfvars is gitignored
+# (see infrastructure/aws/README.md). Never commit a filled-in copy.
+
+environment = "staging"
+aws_region  = "us-east-1"
+
+# Filled in by CI after it builds and pushes images (see
+# .github/workflows/deploy.yml) -- placeholders here only so
+# `terraform plan` has something to diff against before the first deploy.
+api_image = "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/neo-lloyds/api:latest"
+portal_images = {
+  broker_portal       = "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/neo-lloyds/broker-portal:latest"
+  capital_portal      = "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/neo-lloyds/capital-portal:latest"
+  corporate_portal    = "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/neo-lloyds/corporate-portal:latest"
+  admin_portal        = "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/neo-lloyds/admin-portal:latest"
+  claims_admin_portal = "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/neo-lloyds/claims-admin-portal:latest"
+}
+
+# domain_name = "staging.neo-lloyds.example"   # leave commented until a real domain exists
+
+# WorkOS Staging environment (apps/admin-portal/README.md) -- Production's
+# values are deliberately not here yet (no real domain configured on that
+# WorkOS environment).
+# workos_client_id       = "client_01M0DMPW9VVWVXC5PZHAEW6S2K"
+# workos_organization_id = "org_01M0DMQZE6GYX4PV7ZPG5JH6QN"
+# oidc_jwks_url           = "https://api.workos.com/sso/jwks/client_01M0DMPW9VVWVXC5PZHAEW6S2K"
+
+# Secrets -- pass via -var or TF_VAR_* environment variables at apply
+# time, never written into this file:
+#   TF_VAR_workos_api_key=sk_...
+#   TF_VAR_anthropic_api_key=sk-ant-...

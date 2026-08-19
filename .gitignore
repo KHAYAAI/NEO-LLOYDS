@@ -12,3 +12,15 @@ coverage/
 apps/*/test/*.js
 apps/*/test/*.d.ts
 apps/*/test/*.map
+
+# Terraform (infrastructure/aws/terraform) -- state and filled-in vars are
+# environment-specific and can contain resource IDs/ARNs; secrets never
+# belong in .tfvars regardless (see terraform.tfvars.example). Note:
+# .terraform.lock.hcl is deliberately NOT ignored -- it should be
+# committed for reproducible provider versions, same reasoning as
+# package-lock.json.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.auto.tfvars

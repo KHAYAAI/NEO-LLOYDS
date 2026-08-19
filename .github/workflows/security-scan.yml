@@ -1,0 +1,103 @@
+name: Automated security scan (Shannon)
+
+# SIMULATION / TEST ENVIRONMENT — NOT INSURANCE.
+#
+# Runs KeygraphHQ/Shannon (https://github.com/KeygraphHQ/shannon), an
+# autonomous AI pentesting agent, against a running staging deployment.
+#
+# THIS IS NOT A SUBSTITUTE FOR A PROFESSIONAL PENETRATION TEST. Shannon's
+# own README says exactly that -- it's positioned as a continuous
+# complement between the annual/point-in-time engagements a real
+# independent third party runs, not a replacement for one. SOC 2 and most
+# enterprise security questionnaires expect the latter specifically; this
+# workflow does not satisfy that requirement by itself. See
+# infrastructure/aws/README.md's launch-readiness checklist.
+#
+# Shannon actively exploits what it finds -- creates users, submits forms,
+# mutates application state (its own README's words). NEVER point
+# TARGET_URL at a production environment. Manual trigger only, and scoped
+# to a staging URL you provide at run time, specifically so this can't be
+# fired accidentally against something real.
+#
+# Requires two repo secrets neither of which exist yet:
+#   ANTHROPIC_API_KEY  -- the LLM Shannon itself runs on (OpenAI/xAI/AWS
+#                         Bedrock are also supported; this workflow picks
+#                         Anthropic since it's already the analyst
+#                         provider's choice elsewhere in this repo --
+#                         swap the env var/flag if you'd rather use one
+#                         of the others).
+# Without both, this job is skipped, not failed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Staging URL to scan (never production)'
+        required: true
+      target_app:
+        description: 'Which app to scan: api, broker-portal, capital-portal, corporate-portal, admin-portal, or claims-admin-portal'
+        required: true
+        default: 'api'
+
+jobs:
+  configured:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        run: |
+          if [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ANTHROPIC_API_KEY repo secret is not set -- skipping the Shannon scan. See infrastructure/aws/README.md."
+          fi
+
+  shannon:
+    needs: configured
+    if: needs.configured.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Shannon needs Docker (its own README) -- ubuntu-latest runners
+      # ship it already. `setup` then `start -u <url> -r <repo>` is the
+      # exact usage from Shannon's own README, fetched and quoted
+      # verbatim while writing this -- not guessed. Package name is
+      # `@keygraph/shannon` (not `@keygraphhq/...`, despite the GitHub org
+      # being KeygraphHQ).
+      - name: Configure Shannon
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npx --yes @keygraph/shannon setup
+
+      - name: Run Shannon against ${{ inputs.target_url }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          npx --yes @keygraph/shannon start \
+            -u "${{ inputs.target_url }}" \
+            -r "./repo/apps/${{ inputs.target_app }}" \
+            | tee shannon-report.txt
+        # `setup` is described as interactive in Shannon's README; this
+        # workflow has never actually been run (no LLM API key or live
+        # staging target was available in the sandbox that authored it),
+        # so confirm `setup` behaves non-interactively when
+        # ANTHROPIC_API_KEY is already set via env before trusting this
+        # job to complete unattended -- it may need `setup`'s flags
+        # (undocumented in the README as fetched) instead of relying on
+        # env-var auto-detection.
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shannon-report
+          path: shannon-report.txt

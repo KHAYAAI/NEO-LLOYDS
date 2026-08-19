@@ -1,0 +1,84 @@
+name: Build & push images
+
+# SIMULATION / TEST ENVIRONMENT — NOT INSURANCE.
+#
+# Builds every container image (apps/api/Dockerfile, and
+# infrastructure/aws/portal.Dockerfile once per portal) and pushes to ECR.
+# Does NOT deploy or run `terraform apply` -- that stays a manual step
+# (infrastructure/aws/README.md) until this is running against a real,
+# reviewed AWS account. Gated entirely behind repo secrets that don't
+# exist until an AWS account and an ECR-push IAM role are created --
+# every job below no-ops (skipped, not failed) until AWS_ROLE_ARN is set.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'infrastructure/aws/portal.Dockerfile'
+      - '.github/workflows/build-and-push.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write # GitHub OIDC -> AWS role assumption, no long-lived AWS keys stored as secrets.
+  contents: read
+
+jobs:
+  configured:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        run: |
+          if [ -n "${{ secrets.AWS_ROLE_ARN }}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::AWS_ROLE_ARN repo secret is not set -- skipping build-and-push. See infrastructure/aws/README.md."
+          fi
+
+  api:
+    needs: configured
+    if: needs.configured.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+      - run: |
+          docker build -f apps/api/Dockerfile \
+            -t ${{ steps.ecr.outputs.registry }}/neo-lloyds/api:${{ github.sha }} \
+            -t ${{ steps.ecr.outputs.registry }}/neo-lloyds/api:latest \
+            .
+          docker push ${{ steps.ecr.outputs.registry }}/neo-lloyds/api:${{ github.sha }}
+          docker push ${{ steps.ecr.outputs.registry }}/neo-lloyds/api:latest
+
+  portals:
+    needs: configured
+    if: needs.configured.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        portal: [broker-portal, capital-portal, corporate-portal, admin-portal, claims-admin-portal]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+      - run: |
+          docker build -f infrastructure/aws/portal.Dockerfile \
+            --build-arg PORTAL=${{ matrix.portal }} \
+            -t ${{ steps.ecr.outputs.registry }}/neo-lloyds/${{ matrix.portal }}:${{ github.sha }} \
+            -t ${{ steps.ecr.outputs.registry }}/neo-lloyds/${{ matrix.portal }}:latest \
+            .
+          docker push ${{ steps.ecr.outputs.registry }}/neo-lloyds/${{ matrix.portal }}:${{ github.sha }}
+          docker push ${{ steps.ecr.outputs.registry }}/neo-lloyds/${{ matrix.portal }}:latest
