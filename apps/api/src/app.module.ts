@@ -36,6 +36,8 @@ import { SettlementController } from './settlement/settlement.controller.js';
 import { SettlementService } from './settlement/settlement.service.js';
 import { SETTLEMENT_PROVIDER } from './settlement/tokens.js';
 import { createSettlementProvider } from './settlement/providers.js';
+import { KYB_PROVIDER, SANCTIONS_PROVIDER } from './compliance/tokens.js';
+import { createKybProvider, createSanctionsProvider } from './compliance/providers.js';
 import { AgentController } from './agent/agent.controller.js';
 import { AgentService } from './agent/agent.service.js';
 import { JurisdictionController } from './jurisdiction/jurisdiction.controller.js';
@@ -148,6 +150,8 @@ export class AppModule {
     clock: unknown;
     analystProvider?: unknown;
     settlementProvider?: unknown;
+    kybProvider?: unknown;
+    sanctionsProvider?: unknown;
     extra?: unknown[];
   }): DynamicModule {
     return {
@@ -177,6 +181,14 @@ export class AppModule {
         {
           provide: SETTLEMENT_PROVIDER,
           useValue: providers.settlementProvider ?? createSettlementProvider(),
+        },
+        {
+          provide: KYB_PROVIDER,
+          useValue: providers.kybProvider ?? createKybProvider(),
+        },
+        {
+          provide: SANCTIONS_PROVIDER,
+          useValue: providers.sanctionsProvider ?? createSanctionsProvider(),
         },
         { provide: OidcVerifier, useFactory: () => new OidcVerifier() },
         { provide: APP_GUARD, useClass: ApiCredentialGuard },
@@ -210,6 +222,8 @@ export class AppModule {
         { provide: CLOCK, useClass: SystemClock },
         { provide: ANALYST_PROVIDER, useFactory: createAnalystProvider },
         { provide: SETTLEMENT_PROVIDER, useFactory: createSettlementProvider },
+        { provide: KYB_PROVIDER, useFactory: createKybProvider },
+        { provide: SANCTIONS_PROVIDER, useFactory: createSanctionsProvider },
         { provide: OidcVerifier, useFactory: () => new OidcVerifier() },
         { provide: APP_GUARD, useClass: ApiCredentialGuard },
       ],

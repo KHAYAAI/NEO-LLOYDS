@@ -14,6 +14,8 @@ import {
 } from '../persistence/ports.js';
 import { AuditService } from '../common/audit.service.js';
 import { generateCredential, hashSecret } from '../common/auth.js';
+import type { KybProvider, SanctionsProvider } from '../compliance/providers.js';
+import { KYB_PROVIDER, SANCTIONS_PROVIDER } from '../compliance/tokens.js';
 
 const JURISDICTION = /^[A-Z]{2}$/;
 
@@ -22,6 +24,8 @@ export class IdentityService {
   constructor(
     @Inject(IDENTITY_REPOSITORY) private readonly repository: IdentityRepository,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(KYB_PROVIDER) private readonly kybProvider: KybProvider,
+    @Inject(SANCTIONS_PROVIDER) private readonly sanctionsProvider: SanctionsProvider,
   ) {}
 
   async createOrganisation(
@@ -145,6 +149,42 @@ export class IdentityService {
     });
 
     return after;
+  }
+
+  /**
+   * Runs the KYB and sanctions-screening providers and records what they
+   * report — nothing more. This is deliberately *not* an authorisation
+   * decision: `kybStatus` only ever changes via the explicit `setKybStatus`
+   * admin action above, unchanged by this method. With the shipped
+   * `NullKybProvider`/`NullSanctionsProvider` (docs/security-model.md §8:
+   * no real vendor is integrated), this records an honest "not screened"
+   * result — it does not simulate a pass.
+   */
+  async runComplianceChecks(ctx: AuthContext, organisationId: string) {
+    const organisation = await this.repository.findOrganisation(organisationId);
+    if (!organisation) throw new NotFoundException('Organisation not found');
+
+    const [kyb, sanctions] = await Promise.all([
+      this.kybProvider.check({
+        organisationId,
+        legalName: organisation.legalName,
+        jurisdiction: organisation.jurisdiction,
+      }),
+      this.sanctionsProvider.screen({ organisationId, legalName: organisation.legalName }),
+    ]);
+
+    await this.audit.record({
+      ctx,
+      action: 'identity.compliance.check',
+      subjectType: 'Organisation',
+      subjectId: organisationId,
+      decision: 'ALLOWED',
+      reason: `Compliance check run: KYB=${kyb.verdict} via ${kyb.providerId}; sanctions screened=${sanctions.screened} via ${sanctions.providerId} (${sanctions.hits.length} hit(s))`,
+      after: { kyb, sanctions },
+      policy: 'COMPLIANCE_CHECK_INFORMATIONAL',
+    });
+
+    return { kyb, sanctions };
   }
 
   /**

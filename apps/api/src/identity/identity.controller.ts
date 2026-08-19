@@ -138,6 +138,16 @@ export class IdentityController {
     };
   }
 
+  @Post('organisations/:id/compliance/check')
+  @RequireScopes('identity:admin')
+  @ApiOperation({
+    summary:
+      'Run the configured KYB and sanctions-screening providers and record what they report (informational only -- see IdentityService.runComplianceChecks). This never changes kybStatus by itself; POST .../kyb remains the explicit, manual decision.',
+  })
+  async runComplianceChecks(@Req() req: RequestWithAuth, @Param('id') id: string) {
+    return this.identity.runComplianceChecks(auth(req), id);
+  }
+
   @Post('organisations/:id/oidc-users')
   @RequireScopes('identity:admin')
   @ApiOperation({

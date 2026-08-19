@@ -101,13 +101,26 @@ has been closed as of the hardening pass in this section's changelog.
 
 None of the remaining items are closable by more code alone:
 
-- **KYB/KYC and sanctions screening** need a signed contract with a vendor
-  (e.g. Onfido, ComplyAdvantage, Refinitiv World-Check) and their live API
-  credentials. The honest next step, mirroring how `SettlementProvider`
-  (§9 of `docs/reports/phase-10.md`) and `AnalystProvider` are already
-  built, is a `KybProvider`/`SanctionsProvider` interface with a `Null`
-  implementation for tests and a real adapter behind it — not something to
-  build speculatively against a vendor with no account to test against.
+- **KYB/KYC and sanctions screening still need a signed contract with a
+  vendor** (e.g. Onfido, ComplyAdvantage, Refinitiv World-Check) and their
+  live API credentials — that part hasn't changed. **What has changed:**
+  the `KybProvider`/`SanctionsProvider` interface this section used to
+  describe as a next step now exists
+  (`apps/api/src/compliance/providers.ts`), mirroring `SettlementProvider`
+  (§9 of `docs/reports/phase-10.md`) and `AnalystProvider` exactly — a
+  `Null` implementation ships today (`NullKybProvider`,
+  `NullSanctionsProvider`), wired into a real code path
+  (`IdentityService.runComplianceChecks`,
+  `POST /identity/organisations/:id/compliance/check`) that records what a
+  provider reports without ever changing `kybStatus` itself — that remains
+  the separate, explicit `setKybStatus` admin action, unchanged. A real
+  vendor adapter is one class away from being dropped in behind the same
+  interface; `createKybProvider`/`createSanctionsProvider` deliberately
+  throw at startup if a `*_PROVIDER_API_KEY` is set with no adapter
+  implemented, rather than silently no-op with a real key configured. The
+  `screened: false` field on `SanctionsScreeningResult` exists specifically
+  so an empty `hits: []` from the null provider can never be misread as
+  "screened clean" by anything downstream.
 - **An HSM/secrets manager** (AWS KMS/Secrets Manager, HashiCorp Vault,
   GCP Secret Manager) is an infrastructure choice tied to wherever this is
   actually deployed; picking one before a deployment target exists would be

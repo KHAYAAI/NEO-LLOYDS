@@ -627,6 +627,36 @@ describe('identity and governance', () => {
     expect(JSON.stringify(stored)).not.toContain(secret);
   });
 
+  it('runs the configured (null) compliance providers and records the result, without touching kybStatus', async () => {
+    const before = await authed().get(`/identity/organisations/${rootOrgId}`).expect(200);
+    expect(before.body.organisation.kybStatus).toBe('UNVERIFIED');
+
+    const response = await authed()
+      .post(`/identity/organisations/${rootOrgId}/compliance/check`)
+      .expect(201);
+
+    expect(response.body.kyb).toEqual({
+      providerId: 'null-provider',
+      verdict: 'NOT_INTEGRATED',
+      checkedAt: expect.any(String),
+    });
+    expect(response.body.sanctions).toEqual({
+      providerId: 'null-provider',
+      screened: false,
+      hits: [],
+      screenedAt: expect.any(String),
+    });
+
+    // The check is informational only -- setKybStatus is the only thing
+    // that ever changes kybStatus, and this endpoint never calls it.
+    const after = await authed().get(`/identity/organisations/${rootOrgId}`).expect(200);
+    expect(after.body.organisation.kybStatus).toBe('UNVERIFIED');
+
+    const record = audit.records.at(-1);
+    expect(record?.action).toBe('identity.compliance.check');
+    expect(record?.reason).toContain('NOT_INTEGRATED');
+  });
+
   it('writes an audit record for every material action', async () => {
     const before = audit.records.length;
     await authed()
