@@ -16,6 +16,20 @@ Secrets are stored as a salted SHA-256 hash and compared in constant time. The
 plaintext is returned once at issue and is never retrievable. Unknown key and
 wrong secret return the same message, deliberately.
 
+**Or, if `OIDC_ISSUER_URL` is configured** (security-model.md §10):
+
+```
+Authorization: Bearer <OIDC ID token>
+```
+
+The guard tells the two apart by dot count (one dot: `<keyId>.<secret>`;
+two: a JWT). The token must be signed by the configured issuer, carry the
+configured audience if one is set, and not be expired; its `sub` claim must
+already be linked to a `User` via
+`POST /identity/organisations/:id/oidc-users`. There is no browser login
+flow (redirect/callback/PKCE) in this repository yet — this is the
+server-side verification half only.
+
 Two gates apply to every route, and both must pass: the credential's **scope**
 (`graph:read`, `graph:write`, `identity:admin`, `identity:read`, `audit:read`,
 or `*`) and the organisation's **market role**. Tenant isolation applies on top:
@@ -42,6 +56,7 @@ which may read across tenants (every such read is audited) but never write.
 | POST | `/identity/organisations/:id/roles` | `identity:admin` | One market role per call; each is a separate grant |
 | POST | `/identity/organisations/:id/kyb` | `identity:admin` | Prototype: manual decision only, no KYB provider is integrated |
 | POST | `/identity/organisations/:id/credentials` | `identity:admin` | Returns the secret **once** |
+| POST | `/identity/organisations/:id/oidc-users` | `identity:admin` | Links a human at a configured OIDC issuer (`OIDC_ISSUER_URL`) to this organisation — security-model.md §10. No self-registration. |
 | POST | `/identity/credentials/:keyId/revoke` | `identity:admin` | Takes effect immediately |
 | POST | `/identity/mandates` | `identity:admin` | Only the principal may mandate its agent |
 | GET | `/identity/audit` | `audit:read` | Append-only log, newest first; regulators see across tenants |

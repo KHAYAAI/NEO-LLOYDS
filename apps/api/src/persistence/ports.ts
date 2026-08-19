@@ -38,6 +38,22 @@ export interface StoredCredential {
   revokedAt: Date | null;
 }
 
+/**
+ * A human OIDC-linked identity (security-model.md §10). `oidcIssuer` and
+ * `oidcSubject` are set together, by an admin, once — there is no
+ * self-registration path.
+ */
+export interface StoredUser {
+  id: string;
+  organisationId: string;
+  email: string;
+  displayName: string;
+  active: boolean;
+  scopes: string[];
+  oidcIssuer: string | null;
+  oidcSubject: string | null;
+}
+
 export interface IdentityRepository {
   createOrganisation(input: {
     id: string;
@@ -58,6 +74,9 @@ export interface IdentityRepository {
 
   createMandate(mandate: AgentMandate & { id: string }): Promise<AgentMandate>;
   findActiveMandate(agentOrganisationId: string): Promise<AgentMandate | undefined>;
+
+  createUser(input: Omit<StoredUser, 'active'>): Promise<StoredUser>;
+  findUserByOidcSubject(issuer: string, subject: string): Promise<StoredUser | undefined>;
 }
 
 export interface AuditRepository {

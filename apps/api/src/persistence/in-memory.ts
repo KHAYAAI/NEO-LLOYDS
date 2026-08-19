@@ -33,6 +33,7 @@ import type {
   StoredClaim,
   StoredClaimPayout,
   StoredCredential,
+  StoredUser,
   StoredInterest,
   StoredListing,
   StoredReinsuranceCession,
@@ -56,6 +57,7 @@ export class InMemoryIdentityRepository implements IdentityRepository {
   private readonly organisations = new Map<string, Organisation>();
   private readonly credentials = new Map<string, StoredCredential>();
   private readonly mandates = new Map<string, AgentMandate>();
+  private readonly users = new Map<string, StoredUser>();
 
   async createOrganisation(input: {
     id: string;
@@ -129,6 +131,16 @@ export class InMemoryIdentityRepository implements IdentityRepository {
   async createMandate(mandate: AgentMandate & { id: string }): Promise<AgentMandate> {
     this.mandates.set(mandate.agentOrganisationId, mandate);
     return mandate;
+  }
+
+  async createUser(input: Omit<StoredUser, 'active'>): Promise<StoredUser> {
+    const user: StoredUser = { ...input, active: true };
+    this.users.set(user.id, user);
+    return user;
+  }
+
+  async findUserByOidcSubject(issuer: string, subject: string): Promise<StoredUser | undefined> {
+    return [...this.users.values()].find((u) => u.oidcIssuer === issuer && u.oidcSubject === subject);
   }
 
   async findActiveMandate(agentOrganisationId: string): Promise<AgentMandate | undefined> {

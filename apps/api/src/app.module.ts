@@ -2,6 +2,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ApiCredentialGuard } from './common/auth.js';
+import { OidcVerifier } from './common/oidc.js';
 import { AuditService } from './common/audit.service.js';
 import { HealthController } from './common/health.controller.js';
 import { IdentityController } from './identity/identity.controller.js';
@@ -177,6 +178,7 @@ export class AppModule {
           provide: SETTLEMENT_PROVIDER,
           useValue: providers.settlementProvider ?? createSettlementProvider(),
         },
+        { provide: OidcVerifier, useFactory: () => new OidcVerifier() },
         { provide: APP_GUARD, useClass: ApiCredentialGuard },
         ...((providers.extra ?? []) as never[]),
       ],
@@ -208,6 +210,7 @@ export class AppModule {
         { provide: CLOCK, useClass: SystemClock },
         { provide: ANALYST_PROVIDER, useFactory: createAnalystProvider },
         { provide: SETTLEMENT_PROVIDER, useFactory: createSettlementProvider },
+        { provide: OidcVerifier, useFactory: () => new OidcVerifier() },
         { provide: APP_GUARD, useClass: ApiCredentialGuard },
       ],
     };

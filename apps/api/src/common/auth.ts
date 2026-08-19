@@ -21,6 +21,7 @@ import {
   type Clock,
   type IdentityRepository,
 } from '../persistence/ports.js';
+import { OidcVerifier } from './oidc.js';
 
 /**
  * Credential secrets are stored only as a salted SHA-256 hash and compared in
@@ -78,6 +79,7 @@ export class ApiCredentialGuard implements CanActivate {
     @Inject(Reflector) private readonly reflector: Reflector,
     @Inject(IDENTITY_REPOSITORY) private readonly identity: IdentityRepository,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(OidcVerifier) private readonly oidc: OidcVerifier,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -138,6 +140,15 @@ export class ApiCredentialGuard implements CanActivate {
     }
 
     const token = value.slice('Bearer '.length);
+
+    // A Neo-Lloyds API credential is exactly `<keyId>.<secret>` (one dot).
+    // A JWT is `<header>.<payload>.<signature>` (two dots) -- distinguishing
+    // on dot count is unambiguous because keyId/secret are hex, never
+    // containing a dot themselves (generateCredential in this file).
+    if (token.split('.').length === 3) {
+      return this.resolveOidc(token);
+    }
+
     const separator = token.indexOf('.');
     if (separator < 0) {
       this.logger.warn('Rejected malformed credential (no keyId separator)');
@@ -183,6 +194,51 @@ export class ApiCredentialGuard implements CanActivate {
         ? { principalOrganisationId: organisation.principalOrganisationId }
         : {}),
       ...(mandate ? { mandate } : {}),
+    };
+  }
+
+  /**
+   * OIDC ID token path (security-model.md §10). Verifies signature, issuer,
+   * audience and expiry against the configured provider, then resolves the
+   * verified (issuer, subject) pair to a `User` an admin has already linked
+   * to an organisation -- there is no self-registration, and an unlinked
+   * subject is rejected the same as an unknown API key.
+   */
+  private async resolveOidc(idToken: string): Promise<AuthContext> {
+    if (!this.oidc.enabled) {
+      this.logger.warn('Rejected JWT bearer token: OIDC is not configured on this deployment');
+      throw new UnauthorizedException('OIDC sign-in is not enabled on this deployment');
+    }
+
+    let identity;
+    try {
+      identity = await this.oidc.verify(idToken);
+    } catch (error) {
+      this.logger.warn(`Rejected OIDC token: ${error instanceof Error ? error.message : 'verification failed'}`);
+      throw new UnauthorizedException('Invalid OIDC token');
+    }
+
+    const user = await this.identity.findUserByOidcSubject(identity.issuer, identity.subject);
+    if (!user || !user.active) {
+      this.logger.warn(`Rejected OIDC token: subject ${identity.subject} at ${identity.issuer} is not linked to any user`);
+      throw new UnauthorizedException('This identity is not linked to a Neo-Lloyds user');
+    }
+
+    const organisation = await this.identity.findOrganisation(user.organisationId);
+    if (!organisation || !organisation.active) {
+      this.logger.warn(`Rejected OIDC user ${user.id} for inactive/unknown organisation`);
+      throw new UnauthorizedException('Organisation is not active');
+    }
+
+    return {
+      organisationId: organisation.id,
+      subjectId: user.id,
+      subjectKind: 'USER',
+      roles: organisation.roles,
+      scopes: user.scopes,
+      ...(organisation.principalOrganisationId
+        ? { principalOrganisationId: organisation.principalOrganisationId }
+        : {}),
     };
   }
 }

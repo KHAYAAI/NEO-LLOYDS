@@ -45,6 +45,14 @@ class IssueCredentialDto {
   @IsOptional() @IsISO8601() expiresAt?: string;
 }
 
+class ProvisionOidcUserDto {
+  @IsString() email: string;
+  @IsString() @MaxLength(200) displayName: string;
+  @IsArray() @IsString({ each: true }) scopes: string[];
+  @IsString() oidcIssuer: string;
+  @IsString() oidcSubject: string;
+}
+
 class CreateMandateDto {
   @IsString() agentOrganisationId: string;
   @IsArray() @IsString({ each: true }) permittedActions: string[];
@@ -128,6 +136,20 @@ export class IdentityController {
       credential,
       warning: 'Store the secret now. It is hashed at rest and cannot be retrieved again.',
     };
+  }
+
+  @Post('organisations/:id/oidc-users')
+  @RequireScopes('identity:admin')
+  @ApiOperation({
+    summary:
+      'Link a human at a configured OIDC issuer (OIDC_ISSUER_URL) to this organisation, for OIDC sign-in — security-model.md §10. There is no self-registration: an admin must already know the subject’s `sub` claim.',
+  })
+  async provisionOidcUser(
+    @Req() req: RequestWithAuth,
+    @Param('id') id: string,
+    @Body() body: ProvisionOidcUserDto,
+  ) {
+    return { user: await this.identity.provisionOidcUser(auth(req), { organisationId: id, ...body }) };
   }
 
   @Post('credentials/:keyId/revoke')

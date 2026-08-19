@@ -69,9 +69,9 @@ or `BROKER`.
 - **Underwriting actions** (assess/approve) — `UNDERWRITER`-role
   functionality belongs in a different portal (or an admin surface), not
   bundled into the broker's. Capital-provider (`apps/capital-portal`),
-  corporate/claims (`apps/corporate-portal`), and admin
-  (`apps/admin-portal`) portals now exist, following this app's pattern —
-  see each one's own README.
+  corporate/claims (`apps/corporate-portal`), admin (`apps/admin-portal`),
+  and claims-administrator (`apps/claims-admin-portal`) portals now exist,
+  following this app's pattern — see each one's own README.
 - **A design system.** Styling here (`src/app/globals.css`) is
   intentionally plain, utilitarian CSS — enough to be legible and usable,
   not a component library or brand decision. That is a real decision for

@@ -1,0 +1,81 @@
+name: CI
+
+# SIMULATION / TEST ENVIRONMENT — NOT INSURANCE.
+# Gates every push/PR on the same three checks the project has always
+# claimed pass: the full test suite, typecheck, and lint. Before this
+# workflow existed those claims were only verified by hand.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: neolloyds
+          POSTGRES_PASSWORD: neolloyds
+          POSTGRES_DB: neolloyds
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U neolloyds -d neolloyds"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://neolloyds:neolloyds@localhost:5432/neolloyds?schema=public
+      REDIS_URL: redis://localhost:6379
+      NODE_ENV: test
+      SIMULATION_MODE: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run db:generate
+      - run: npm -w @neo-lloyds/database run migrate
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+      - name: Build every workspace
+        run: npm run build
+
+  portal-checks:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [broker-portal, capital-portal, corporate-portal, admin-portal]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Each portal ships its own next/core-web-vitals ESLint config and is
+      # excluded from the root .eslintrc.json (see its ignorePatterns) —
+      # `next build` is what actually runs that lint pass, same as a
+      # developer's local verification.
+      - run: npm -w @neo-lloyds/${{ matrix.app }} run build

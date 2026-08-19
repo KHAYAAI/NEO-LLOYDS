@@ -89,13 +89,34 @@ EU) and the storage layer honours them per-organisation.
 
 ## 8. Known gaps in this prototype
 
-Stated plainly rather than papered over: no SSO/OIDC login, no real KYB/KYC
-provider, no sanctions screening integration, no HSM for key material, no
-secrets manager, no penetration testing. These are tracked in
-`docs/roadmap.md` and must be closed before any non-simulated use. §9 records
-what has been closed as of the hardening pass in this section's changelog,
-and §10 gives the honest answer on SSO specifically, since it is the gap
-most often asked about and least substitutable by more code alone.
+Stated plainly rather than papered over: no real KYB/KYC provider, no
+sanctions screening integration, no HSM for key material, no secrets
+manager, no penetration testing, no real reinsurer counterparty, no
+regulatory licensing, and settlement still has exactly one implementation
+(`NullSettlementProvider` — no real money moves). These are tracked in
+`docs/roadmap.md` and must be closed before any non-simulated use.
+**OIDC/SSO login is the one item that moved off this list** — §10 covers
+what is now real and what is still an external dependency. §9 records what
+has been closed as of the hardening pass in this section's changelog.
+
+None of the remaining items are closable by more code alone:
+
+- **KYB/KYC and sanctions screening** need a signed contract with a vendor
+  (e.g. Onfido, ComplyAdvantage, Refinitiv World-Check) and their live API
+  credentials. The honest next step, mirroring how `SettlementProvider`
+  (§9 of `docs/reports/phase-10.md`) and `AnalystProvider` are already
+  built, is a `KybProvider`/`SanctionsProvider` interface with a `Null`
+  implementation for tests and a real adapter behind it — not something to
+  build speculatively against a vendor with no account to test against.
+- **An HSM/secrets manager** (AWS KMS/Secrets Manager, HashiCorp Vault,
+  GCP Secret Manager) is an infrastructure choice tied to wherever this is
+  actually deployed; picking one before a deployment target exists would be
+  guessing.
+- **A penetration test** requires an independent third party attacking a
+  running instance — not something achievable inside this repository.
+- **A real reinsurer counterparty and regulatory licensing** are legal and
+  business processes, not engineering ones, and Neo-Lloyds is explicitly
+  a technology prototype, not a licensed entity, until that happens.
 
 ## 9. Hardening applied (production baseline)
 
@@ -141,54 +162,62 @@ SSO, KYB, sanctions screening and a penetration test are not.
 
 ## 10. SSO / enterprise identity — the honest answer
 
-There is currently **no SSO login** — no OIDC, no SAML, no "Sign in with
-your identity provider." What exists is machine credentials (§2): a
-`keyId`/`secret` pair, suitable for API integrations and for the broker/
-capital-provider portals once they exist, but not for a human logging in
-through an enterprise identity provider (Okta, Azure AD, Google Workspace).
+**Updated: an OIDC authenticator is now real code**, not just a shape
+`AuthContext` was left ready for. `ApiCredentialGuard.resolve`
+(`apps/api/src/common/auth.ts`) now has two paths: the original
+`<keyId>.<secret>` machine credential (§2, unchanged), and an OIDC ID token
+— distinguished by dot count in the bearer token (one dot vs. the three
+segments of a JWT). Set `OIDC_ISSUER_URL` (see `.env.example`) and it is
+live: real signature verification against the issuer's JWKS, real issuer
+and audience checks, real expiry enforcement (`apps/api/src/common/oidc.ts`,
+via `jose` — the same library, doing the same cryptographic checks, that a
+production OIDC client would use). Unset, the bearer guard behaves exactly
+as before this was added.
 
-This is not an oversight, and it is also not purely a coding task:
+An admin links a human to an organisation with
+`POST /identity/organisations/:id/oidc-users` (`identity:admin`, mirrors
+credential issuance) — `email`, `displayName`, `scopes`, and the verified
+`oidcIssuer`/`oidcSubject` pair, stored on the previously-unused `User`
+table. A verified token for an unlinked subject is rejected exactly like an
+unknown API key is — there is no self-registration and no automatic role
+inference from IdP claims. `apps/api/test/oidc-auth.test.ts` proves the
+full path: a real RS256 key pair, a real signed token, an accepted linked
+subject, and rejections for an unlinked subject, wrong audience, and
+expired token.
 
-**What is already in place for it.** `AuthContext` (§1) was deliberately
-shaped to match what an OIDC session produces — `organisationId`,
-`subjectId`, `roles`, `scopes` — specifically so that adding OIDC later
-replaces the *authenticator* (`ApiCredentialGuard.resolve`) without touching
-a single authorisation check downstream. Every `RequireScopes`/`RequireRoles`
-decorator, every `requireTenantAccess` call, every audit record — all of it
-is already written against the interface an SSO session would also produce.
+**What is honestly still missing — this is now an integration problem, not
+a coding problem:**
 
-**What SSO actually requires, and why none of it can be simulated
-honestly:**
+1. **A real, registered identity provider.** The verifier works against any
+   spec-compliant OIDC issuer, but no Okta/Azure AD/Google Workspace tenant
+   is registered for this project, so it has never been exercised against
+   a real IdP's actual login screen and consent flow — only against a
+   locally-generated key pair in tests and a live-but-synthetic run during
+   development (`OIDC_JWKS_STATIC_JSON`, documented as dev/test-only in
+   `.env.example`). Which provider(s) to certify against first is a
+   partner/procurement decision, not an engineering one.
+2. **No browser-side login flow (Authorization Code + PKCE, redirect,
+   callback, session cookie issuance) exists in any portal.** What's built
+   is the *server-side token verification* half — the piece that would sit
+   behind such a flow. A portal's browser-based "Sign in with your identity
+   provider" button is a separate, real chunk of work this change
+   deliberately did not fabricate, because it cannot be tested honestly
+   without a registered OIDC client redirect URI at a real provider.
+3. **Identity federation/provisioning (SCIM)**, so an enterprise customer's
+   directory groups and offboarding automatically map onto Neo-Lloyds users
+   and roles, instead of an admin manually calling
+   `POST .../oidc-users` per person. Today, exactly like a manual role
+   grant, revocation is a manual admin action (there is no `revokeUser`
+   endpoint yet either — deactivating a `User` row directly is the only
+   path).
+4. **MFA**, delegated entirely to whichever IdP is eventually integrated —
+   this was always the reason to prioritise OIDC over a local
+   username/password system, and remains true now that the authenticator
+   exists.
 
-1. **A real identity provider relationship.** SSO means integrating against
-   *someone's* IdP — Okta, Azure AD, Google Workspace, or a generic OIDC/SAML
-   provider a customer already runs. That is a partner/procurement decision
-   for you to make (which protocol to support first, which providers to
-   certify against), not something a codebase can pre-select.
-2. **Session and token infrastructure this API doesn't have yet:** an OIDC
-   redirect/callback flow, ID token verification against the provider's
-   JWKS, refresh-token handling, and a session store (Redis is already in
-   the stack for this reason but unused so far).
-3. **Identity federation and provisioning**, so an enterprise customer's
-   directory groups map onto Neo-Lloyds market roles — typically SCIM for
-   automated user provisioning/deprovisioning, which matters operationally
-   (an employee who leaves a customer's company should lose access the
-   moment their IdP account is disabled, not whenever someone remembers to
-   revoke a Neo-Lloyds credential by hand).
-4. **MFA**, generally delegated to the IdP rather than reimplemented, which
-   is itself a reason to prioritise SSO over a local username/password system
-   — building local MFA would be strictly worse than integrating an IdP that
-   already provides it.
-
-**What I would build, in order, once a target IdP is chosen:** an
-`OidcAuthProvider` implementing the same shape `ApiCredentialGuard` already
-produces; token verification against the provider's JWKS with caching;
-a `UserSession` concept distinct from `ApiCredential` (§2's machine
-credentials keep working unmodified — they are a different principal kind,
-not something SSO replaces); and a role-mapping configuration so a
-customer's IdP groups translate into Neo-Lloyds market roles per
-organisation, auditable the same way a manual role grant is today.
-
-None of that is buildable honestly without a real IdP to integrate against —
-which is why it isn't stubbed out with fake OIDC endpoints here. A fake SSO
-flow would be worse than no SSO flow: it would look done when it isn't.
+The distinction that matters: before this change, *nothing* here was
+cryptographically real about OIDC. Now the hard cryptographic part — token
+verification — is real and tested. What remains is connecting it to an
+actual identity provider account and building the browser flow around it,
+neither of which this repository can fabricate without misrepresenting
+what's been verified.

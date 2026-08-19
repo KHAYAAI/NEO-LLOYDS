@@ -37,6 +37,7 @@ import type {
   StoredClaim,
   StoredClaimPayout,
   StoredCredential,
+  StoredUser,
   StoredInterest,
   StoredListing,
   StoredReinsuranceCession,
@@ -260,6 +261,45 @@ export class PrismaIdentityRepository implements IdentityRepository {
       maxTransactionValueMinor: Number(row.maxTransactionValueMinor),
       currency: row.currency,
       expiresAt: row.expiresAt.toISOString(),
+    };
+  }
+
+  async createUser(input: Omit<StoredUser, 'active'>): Promise<StoredUser> {
+    const row = await this.prisma.user.create({
+      data: {
+        id: input.id,
+        organisationId: input.organisationId,
+        email: input.email,
+        displayName: input.displayName,
+        scopes: input.scopes,
+        oidcIssuer: input.oidcIssuer,
+        oidcSubject: input.oidcSubject,
+      },
+    });
+    return {
+      id: row.id,
+      organisationId: row.organisationId,
+      email: row.email,
+      displayName: row.displayName,
+      active: row.active,
+      scopes: row.scopes,
+      oidcIssuer: row.oidcIssuer,
+      oidcSubject: row.oidcSubject,
+    };
+  }
+
+  async findUserByOidcSubject(issuer: string, subject: string): Promise<StoredUser | undefined> {
+    const row = await this.prisma.user.findFirst({ where: { oidcIssuer: issuer, oidcSubject: subject } });
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      organisationId: row.organisationId,
+      email: row.email,
+      displayName: row.displayName,
+      active: row.active,
+      scopes: row.scopes,
+      oidcIssuer: row.oidcIssuer,
+      oidcSubject: row.oidcSubject,
     };
   }
 }

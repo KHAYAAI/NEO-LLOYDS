@@ -25,10 +25,10 @@ The `identity:admin`/`identity:read`/`audit:read` operator journey:
 ## Deliberately out of scope here
 
 - **Claims processing** (advance/loss/decide/settle) — `CLAIMS_ADMINISTRATOR`
-  actions belong here in principle (this portal is the natural home for
-  them), but were not built in this pass; `apps/corporate-portal` already
-  covers the originator side of a claim, and the administrator side is real
-  future scope, not guessed at now.
+  actions were left out of this portal deliberately and now live in their
+  own portal, `apps/claims-admin-portal`, rather than being bolted onto
+  this one's organisation-management focus. `apps/corporate-portal` covers
+  the originator side of a claim.
 - **Mandate management** — `POST /identity/mandates` exists and matters
   (Phase 11's AI Agent API), but issuing/reviewing agent mandates is
   security-sensitive enough to deserve its own considered screen rather than

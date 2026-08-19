@@ -210,9 +210,10 @@ corporate, admin), observability, and the security gaps listed in
   trail. Every numeric/graded field is an explicit illustrative
   placeholder, not real compliance advice — see
   `docs/reports/jurisdiction-modules.md`.
-- **All four portals — DELIVERED**: `apps/broker-portal`,
-  `apps/capital-portal`, `apps/corporate-portal`, `apps/admin-portal`. The
-  first user-facing surfaces in this repository, and the first
+- **All five portals — DELIVERED**: `apps/broker-portal`,
+  `apps/capital-portal`, `apps/corporate-portal`, `apps/admin-portal`,
+  `apps/claims-admin-portal`. The first user-facing surfaces in this
+  repository, and the first
   frontend-stack decision made in it: Next.js App Router + React +
   TypeScript throughout, chosen so every API call — including the one
   holding the pasted credential — runs server-side (Server
@@ -239,12 +240,39 @@ corporate, admin), observability, and the security gaps listed in
     organisations, grant roles, set KYB status (stated plainly as manual
     only — no KYB provider integrated), issue credentials (secret shown
     once), browse the audit log, browse jurisdiction modules.
+  - **Claims administrator** (`CLAIMS_ADMINISTRATOR`): advance a claim
+    through its state machine, run the coverage test (loss calculation),
+    record a human approve/reject decision, settle an approved claim —
+    every action the API has had since Phase 7 but no portal exposed until
+    this one. Its login validation reads the *class* of API error (401/403
+    vs. 404) against a syntactically-plausible but nonexistent syndication
+    id, rather than an unrelated endpoint, since every claims read endpoint
+    requires an id and 404s for one that doesn't exist.
   Every portal verified live with a real headless browser (Playwright)
   driving the actual running API and PostgreSQL — which caught genuine bugs
   no typecheck or lint alone would have: `redirect()` inside a `try/catch`
   in a Server Action, a `'use server'` file exporting a plain object
   instead of only async functions, and a portal choosing a login-validation
   endpoint that legitimately 404s for a valid, unconfigured credential.
-  Claims processing (`CLAIMS_ADMINISTRATOR` actions) and mandate management
-  are not built into any portal yet — real future scope, not guessed at
-  now. See each portal's own README.
+  Mandate management is not built into any portal yet — real future scope,
+  not guessed at now. See each portal's own README.
+- **Launch-blocker infrastructure (partial) — DELIVERED**: a CI pipeline
+  (`.github/workflows/ci.yml`) runs the full test suite, typecheck, lint,
+  and every workspace build (including each portal's `next build`) on
+  every push/PR against real Postgres/Redis service containers — previously
+  none of that was automated. An OIDC authenticator
+  (`apps/api/src/common/oidc.ts`) gives `ApiCredentialGuard` a second,
+  fully real path alongside the API-key credential: genuine JWT signature,
+  issuer, audience and expiry verification via `jose`, with a new
+  `POST /identity/organisations/:id/oidc-users` admin endpoint linking a
+  verified (issuer, subject) pair to the previously-dormant `User` table.
+  `apps/api/test/oidc-auth.test.ts` proves it end-to-end with a real
+  RS256 key pair and signed tokens; a live run against real PostgreSQL
+  (migration `20260819090000_0011_oidc_user_links`) confirmed the same
+  flow through the actual running API. `docs/security-model.md` §10 is
+  explicit about what this does and does not close: no registered
+  real-world identity provider, no browser-side login flow. The rest of
+  §8's list (real KYB/KYC, sanctions screening, an HSM/secrets manager, a
+  penetration test, a real reinsurer counterparty, real settlement,
+  regulatory licensing) is unchanged and, per §8, not closable by more
+  code alone.

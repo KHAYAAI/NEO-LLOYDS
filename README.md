@@ -39,23 +39,39 @@ European Union, the United States, Russia, China, Singapore, and Hong Kong
 (`packages/config`, published at `GET /jurisdictions`) — see
 `docs/reports/jurisdiction-modules.md`. **All four portals are delivered**
 (`apps/broker-portal`, `apps/capital-portal`, `apps/corporate-portal`,
-`apps/admin-portal`) — the first user-facing UIs and the first
-frontend-stack decision in this repository (Next.js App Router + React +
-TypeScript throughout, credential handling entirely server-side, no
-separate login system in any of them). Broker covers submit → advance → AI
-analyst findings → score → underwriting clearance → list to marketplace;
-capital provider covers browsing listings/expressing interest, setting
-appetite with ranked matches, and viewing exposure/concentration; corporate
-covers reporting a claim, attaching evidence, and viewing payouts; admin
-covers organisation/role/credential management, the audit log, and the
-jurisdiction-module browser. Every portal verified live with a real browser
-driving the actual running API and PostgreSQL — not a mock — which caught
-genuine bugs (a Next.js `redirect()`-inside-`try/catch` gotcha, a `'use
-server'` export-shape restriction, a login-validation endpoint that
-legitimately 404s for a valid but not-yet-onboarded credential) that
-typecheck and lint alone would have missed. Claims processing
-(`CLAIMS_ADMINISTRATOR` actions) and mandate management are not built into
-any portal yet — see each portal's own README.
+`apps/admin-portal`, `apps/claims-admin-portal`) — the first user-facing
+UIs and the first frontend-stack decision in this repository (Next.js App
+Router + React + TypeScript throughout, credential handling entirely
+server-side, no separate login system in any of them). Broker covers
+submit → advance → AI analyst findings → score → underwriting clearance →
+list to marketplace; capital provider covers browsing listings/expressing
+interest, setting appetite with ranked matches, and viewing
+exposure/concentration; corporate covers reporting a claim, attaching
+evidence, and viewing payouts; admin covers organisation/role/credential
+management, the audit log, and the jurisdiction-module browser;
+claims-administrator covers the actions the API has had since Phase 7 but
+no UI exposed until now — advance/loss-calculate/decide/settle. Every
+portal verified live with a real browser driving the actual running API
+and PostgreSQL — not a mock — which caught genuine bugs (a Next.js
+`redirect()`-inside-`try/catch` gotcha, a `'use server'` export-shape
+restriction, a login-validation endpoint that legitimately 404s for a
+valid but not-yet-onboarded credential) that typecheck and lint alone
+would have missed. Mandate management is not built into any portal yet.
+
+**Launch-readiness infrastructure**, per `docs/security-model.md` §8:
+a GitHub Actions CI pipeline (`.github/workflows/ci.yml`) now gates every
+push/PR on the full test suite, typecheck, and lint (previously only
+verified by hand), plus a `next build` per portal. An OIDC authenticator
+is real and tested (`apps/api/src/common/oidc.ts`,
+`apps/api/test/oidc-auth.test.ts`) — genuine JWT signature/issuer/
+audience/expiry verification via `jose`, alongside the original API-key
+credential path — see `docs/security-model.md` §10 for exactly what that
+does and doesn't close (no registered real-world identity provider, no
+browser login flow yet). Everything else in §8 — real KYB/KYC, sanctions
+screening, an HSM/secrets manager, a penetration test, a real reinsurer
+counterparty, real settlement, and regulatory licensing — remains an
+external integration or legal/business process, not something addable by
+more code alone; §8 explains why for each.
 
 Each phase is built vertically: domain logic, migrations where applicable,
 API, authn/authz, audit logging, error handling, docs and a passing test
@@ -110,7 +126,7 @@ npm -w @neo-lloyds/api run build && npm -w @neo-lloyds/api start
 API on `:3001`, OpenAPI at `/docs`.
 
 ```bash
-npm test        # 182 tests
+npm test        # 286 tests
 npm run typecheck
 npm run lint
 ```

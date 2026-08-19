@@ -106,9 +106,16 @@ model User {
   active         Boolean      @default(true)
   /// Scopes granted to this user within the organisation.
   scopes         String[]
+  /// OIDC identity link (the "authenticator" ApiCredentialGuard.resolve
+  /// swaps in per docs/security-model.md §10). Both null until an admin
+  /// links this user to a subject at a configured OIDC issuer; both set
+  /// together, never independently.
+  oidcIssuer     String?
+  oidcSubject    String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
+  @@unique([oidcIssuer, oidcSubject])
   @@index([organisationId])
 }
 

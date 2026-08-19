@@ -192,6 +192,50 @@ export class IdentityService {
     return { keyId, secret, scopes: input.scopes };
   }
 
+  /**
+   * Links a human to an organisation via a real, already-configured OIDC
+   * provider (security-model.md §10) -- there is no self-registration path.
+   * An admin (identity:admin) must already know the subject's `sub` claim
+   * at the issuer, exactly like issuing an API credential is an explicit
+   * admin action, not something a caller grants itself.
+   */
+  async provisionOidcUser(
+    ctx: AuthContext,
+    input: {
+      organisationId: string;
+      email: string;
+      displayName: string;
+      scopes: string[];
+      oidcIssuer: string;
+      oidcSubject: string;
+    },
+  ): Promise<{ id: string; email: string; scopes: string[] }> {
+    const organisation = await this.repository.findOrganisation(input.organisationId);
+    if (!organisation) throw new NotFoundException('Organisation not found');
+
+    const user = await this.repository.createUser({
+      id: randomUUID(),
+      organisationId: input.organisationId,
+      email: input.email,
+      displayName: input.displayName,
+      scopes: input.scopes,
+      oidcIssuer: input.oidcIssuer,
+      oidcSubject: input.oidcSubject,
+    });
+
+    await this.audit.record({
+      ctx,
+      action: 'identity.user.provision_oidc',
+      subjectType: 'User',
+      subjectId: user.id,
+      decision: 'ALLOWED',
+      reason: `OIDC-linked user provisioned: ${input.email}`,
+      after: { id: user.id, email: user.email, scopes: user.scopes, organisationId: input.organisationId },
+    });
+
+    return { id: user.id, email: user.email, scopes: user.scopes };
+  }
+
   async revokeCredential(ctx: AuthContext, keyId: string): Promise<void> {
     const credential = await this.repository.findCredentialByKeyId(keyId);
     if (!credential) throw new NotFoundException('Credential not found');
