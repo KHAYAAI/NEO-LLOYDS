@@ -1,0 +1,165 @@
+:root {
+  --nl-bg: #0b0d12;
+  --nl-panel: #14171f;
+  --nl-border: #262b36;
+  --nl-text: #e6e8ee;
+  --nl-muted: #8b93a3;
+  --nl-accent: #4f8cff;
+  --nl-danger: #ff6b6b;
+  --nl-warn: #f5a623;
+  --nl-ok: #4fd18a;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--nl-bg);
+  color: var(--nl-text);
+}
+
+a {
+  color: var(--nl-accent);
+}
+
+.nl-notice {
+  background: #3a2a06;
+  color: #f5c451;
+  border-bottom: 1px solid #5c4413;
+  padding: 8px 16px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.nl-shell {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+.nl-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.nl-header h1 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.nl-panel {
+  background: var(--nl-panel);
+  border: 1px solid var(--nl-border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.nl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.nl-field label {
+  font-size: 13px;
+  color: var(--nl-muted);
+}
+
+.nl-field input,
+.nl-field textarea,
+.nl-field select {
+  background: #0e1118;
+  border: 1px solid var(--nl-border);
+  color: var(--nl-text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.nl-button {
+  background: var(--nl-accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.nl-button:hover {
+  opacity: 0.9;
+}
+
+.nl-button-secondary {
+  background: transparent;
+  border: 1px solid var(--nl-border);
+  color: var(--nl-text);
+}
+
+.nl-error {
+  color: var(--nl-danger);
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.nl-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.nl-table th,
+.nl-table td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--nl-border);
+}
+
+.nl-table th {
+  color: var(--nl-muted);
+  font-weight: 500;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.nl-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--nl-border);
+  color: var(--nl-muted);
+}
+
+.nl-badge-draft { color: var(--nl-muted); }
+.nl-badge-submitted,
+.nl-badge-analysing { color: var(--nl-warn); border-color: var(--nl-warn); }
+.nl-badge-scored,
+.nl-badge-ready_for_underwriting { color: var(--nl-accent); border-color: var(--nl-accent); }
+.nl-badge-open { color: var(--nl-ok); border-color: var(--nl-ok); }
+
+.nl-muted {
+  color: var(--nl-muted);
+  font-size: 13px;
+}
+
+.nl-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.nl-empty {
+  color: var(--nl-muted);
+  padding: 24px 0;
+  text-align: center;
+}

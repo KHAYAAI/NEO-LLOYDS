@@ -66,13 +66,12 @@ or `BROKER`.
 
 ## Deliberately out of scope here
 
-- **Capital provider, corporate, and admin portals** — not started. This
-  broker portal establishes the pattern (Next.js App Router, server-side
-  credential handling, direct pass-through to `apps/api`); the other three
-  should follow it once someone asks for them, not be guessed at now.
 - **Underwriting actions** (assess/approve) — `UNDERWRITER`-role
   functionality belongs in a different portal (or an admin surface), not
-  bundled into the broker's.
+  bundled into the broker's. Capital-provider (`apps/capital-portal`),
+  corporate/claims (`apps/corporate-portal`), and admin
+  (`apps/admin-portal`) portals now exist, following this app's pattern —
+  see each one's own README.
 - **A design system.** Styling here (`src/app/globals.css`) is
   intentionally plain, utilitarian CSS — enough to be legible and usable,
   not a component library or brand decision. That is a real decision for

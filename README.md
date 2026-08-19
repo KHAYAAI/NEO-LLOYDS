@@ -37,15 +37,25 @@ roadmap's non-phase-gated "Continuous" section: **jurisdiction modules are
 delivered** for South Africa (first, ADR-0004), the United Kingdom, the
 European Union, the United States, Russia, China, Singapore, and Hong Kong
 (`packages/config`, published at `GET /jurisdictions`) — see
-`docs/reports/jurisdiction-modules.md`. **A broker portal is delivered**
-(`apps/broker-portal`) — the first user-facing UI and the first
+`docs/reports/jurisdiction-modules.md`. **All four portals are delivered**
+(`apps/broker-portal`, `apps/capital-portal`, `apps/corporate-portal`,
+`apps/admin-portal`) — the first user-facing UIs and the first
 frontend-stack decision in this repository (Next.js App Router + React +
-TypeScript, credential handling entirely server-side). It covers the
-risk-originator/broker journey end to end against the real API: submit →
-advance → AI analyst findings → score → underwriting clearance status →
-list to marketplace. Verified live with a browser driving the real,
-running API and PostgreSQL. Capital-provider, corporate, and admin portals
-are not started — see `apps/broker-portal/README.md`.
+TypeScript throughout, credential handling entirely server-side, no
+separate login system in any of them). Broker covers submit → advance → AI
+analyst findings → score → underwriting clearance → list to marketplace;
+capital provider covers browsing listings/expressing interest, setting
+appetite with ranked matches, and viewing exposure/concentration; corporate
+covers reporting a claim, attaching evidence, and viewing payouts; admin
+covers organisation/role/credential management, the audit log, and the
+jurisdiction-module browser. Every portal verified live with a real browser
+driving the actual running API and PostgreSQL — not a mock — which caught
+genuine bugs (a Next.js `redirect()`-inside-`try/catch` gotcha, a `'use
+server'` export-shape restriction, a login-validation endpoint that
+legitimately 404s for a valid but not-yet-onboarded credential) that
+typecheck and lint alone would have missed. Claims processing
+(`CLAIMS_ADMINISTRATOR` actions) and mandate management are not built into
+any portal yet — see each portal's own README.
 
 Each phase is built vertically: domain logic, migrations where applicable,
 API, authn/authz, audit logging, error handling, docs and a passing test

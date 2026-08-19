@@ -210,18 +210,41 @@ corporate, admin), observability, and the security gaps listed in
   trail. Every numeric/graded field is an explicit illustrative
   placeholder, not real compliance advice — see
   `docs/reports/jurisdiction-modules.md`.
-- **Broker portal — DELIVERED** (`apps/broker-portal`). The first
-  user-facing surface in this repository, and the first frontend-stack
-  decision made in it: Next.js App Router + React + TypeScript, chosen so
-  every API call — including the one holding the pasted credential — runs
-  server-side (Server Components/Actions), never in client-side JS. No
-  separate login system: it reuses the existing API-key model exactly
-  (security-model.md §2). Covers the risk-originator/broker journey
-  end-to-end against the real API: submit → advance through the submission
-  state machine → AI analyst findings (read-only) → deterministic scoring →
-  underwriting clearance status (read-only) → list to marketplace, gated by
-  the API's own clearance check. Verified live with a browser
-  (Playwright) driving the real, running API and Postgres, not a mock.
-  Capital-provider, corporate, and admin portals are not started — this
-  establishes the pattern for them, not a decision to build them yet. See
-  `apps/broker-portal/README.md`.
+- **All four portals — DELIVERED**: `apps/broker-portal`,
+  `apps/capital-portal`, `apps/corporate-portal`, `apps/admin-portal`. The
+  first user-facing surfaces in this repository, and the first
+  frontend-stack decision made in it: Next.js App Router + React +
+  TypeScript throughout, chosen so every API call — including the one
+  holding the pasted credential — runs server-side (Server
+  Components/Actions), never in client-side JS. No separate login system in
+  any of them: each reuses the existing API-key model exactly
+  (security-model.md §2), validated by a real low-privilege API call, not a
+  shape check. Each covers a distinct journey end-to-end against the real
+  API, no mocks:
+  - **Broker** (`RISK_ORIGINATOR`/`BROKER`): submit → advance through the
+    submission state machine → AI analyst findings (read-only) →
+    deterministic scoring → underwriting clearance status (read-only) →
+    list to marketplace, gated by the API's own clearance check.
+  - **Capital provider** (`CAPITAL_PROVIDER`): browse open listings and
+    express non-binding interest; set appetite and see it ranked against
+    every open listing with explicit reasons; view exposure/concentration,
+    computed live (Phase 6), with a graceful path to set a committed-capital
+    ceiling the first time (the underlying `GET /capital/exposure`
+    genuinely 404s until one exists — handled explicitly, not papered over).
+  - **Corporate** (`RISK_ORIGINATOR`/`BROKER`): report a claim against a
+    `BOUND` syndication (Phase 7), attach evidence, view payouts. No "list
+    my claims" screen — the API has no endpoint for it, so none was
+    invented.
+  - **Admin** (`identity:admin`/`identity:read`/`audit:read`): create
+    organisations, grant roles, set KYB status (stated plainly as manual
+    only — no KYB provider integrated), issue credentials (secret shown
+    once), browse the audit log, browse jurisdiction modules.
+  Every portal verified live with a real headless browser (Playwright)
+  driving the actual running API and PostgreSQL — which caught genuine bugs
+  no typecheck or lint alone would have: `redirect()` inside a `try/catch`
+  in a Server Action, a `'use server'` file exporting a plain object
+  instead of only async functions, and a portal choosing a login-validation
+  endpoint that legitimately 404s for a valid, unconfigured credential.
+  Claims processing (`CLAIMS_ADMINISTRATOR` actions) and mandate management
+  are not built into any portal yet — real future scope, not guessed at
+  now. See each portal's own README.
