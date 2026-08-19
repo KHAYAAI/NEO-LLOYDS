@@ -64,23 +64,30 @@ A WorkOS project and organisation named **Neo-Lloyds** already exist
 (`project_01M0DMPVXCK558FZPDKNPR9305`, Staging environment
 `environment_01M0DMPVXK5JCR5NGQYHDPKGPS`, organisation
 `org_01M0DMQZE6GYX4PV7ZPG5JH6QN`) — see `.env.example` for the client id
-and organisation id to use.
+and organisation id to use. The environment's redirect URI
+(`http://localhost:3000/auth/callback`), logout URI
+(`http://localhost:3000/login`), and CORS web origin
+(`http://localhost:3000`) are configured on it via the WorkOS management
+API, not just documented — a real login redirect from a local `next dev`
+now has somewhere valid to land.
 
 **What is honestly not done, and why it can't be from here:**
 
-1. **`apps/api`'s `OIDC_ISSUER_URL`/`OIDC_JWKS_URL` (see the root
-   `.env.example` and `docs/security-model.md` §10) are not set to
-   WorkOS's real values.** This sandbox has no network access to
-   `workos.com` or `api.workos.com` — every fetch attempt was blocked at
-   the egress proxy — so the exact AuthKit issuer/JWKS URL for this
-   environment could not be confirmed against WorkOS's actual API or
-   docs site, only against their GitHub-hosted SDK README (which does not
-   document it). **Get these two values from the WorkOS dashboard**
-   (Neo-Lloyds project → Staging → the SSO/AuthKit configuration page)
-   before this sign-in path can actually authenticate against the real
-   `apps/api`, and set them there. Until then, `/auth/bridge` will
-   complete, but the Neo-Lloyds API will reject the forwarded token with
-   `401 Invalid OIDC token`.
+1. **`apps/api`'s `OIDC_JWKS_URL` is now known and set correctly** — read
+   directly out of the installed `@workos-inc/node` SDK's own source
+   (`UserManagement.getJwksUrl`), not guessed:
+   `https://api.workos.com/sso/jwks/client_01M0DMPW9VVWVXC5PZHAEW6S2K`
+   (see the root `.env.example`). **`OIDC_ISSUER_URL` is still not set to
+   a confirmed real value.** WorkOS's own SDK verifies its AuthKit access
+   tokens by signature only — no `iss` claim check in its reference
+   implementation — so there was no ground-truth source in this sandbox
+   (no network access to `workos.com`/`api.workos.com` to decode a real
+   token) to confirm what string the issuer check in
+   `apps/api/src/common/oidc.ts` should require. **Decode one real
+   AuthKit access token's `iss` claim** (sign in once, inspect
+   `withAuth()`'s `accessToken`) and set `OIDC_ISSUER_URL` to that exact
+   value before relying on this path — an unconfirmed guess there would
+   reject every real WorkOS token, which is worse than leaving it unset.
 2. **No `POST /identity/organisations/:id/oidc-users` call has been made**
    for any real WorkOS user yet — an admin must still explicitly link a
    signed-in person's WorkOS `sub` claim to a Neo-Lloyds organisation
