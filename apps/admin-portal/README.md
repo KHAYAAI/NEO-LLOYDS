@@ -60,16 +60,35 @@ fetched and followed directly rather than guessed):
 - `src/app/login/workos-actions.ts` + the "Sign in with WorkOS" button on
   `/login` — only rendered when `WORKOS_CLIENT_ID` is set.
 
-A WorkOS project and organisation named **Neo-Lloyds** already exist
-(`project_01M0DMPVXCK558FZPDKNPR9305`, Staging environment
-`environment_01M0DMPVXK5JCR5NGQYHDPKGPS`, organisation
-`org_01M0DMQZE6GYX4PV7ZPG5JH6QN`) — see `.env.example` for the client id
-and organisation id to use. The environment's redirect URI
-(`http://localhost:3000/auth/callback`), logout URI
-(`http://localhost:3000/login`), and CORS web origin
-(`http://localhost:3000`) are configured on it via the WorkOS management
-API, not just documented — a real login redirect from a local `next dev`
-now has somewhere valid to land.
+The **Neo-Lloyds** WorkOS project (`project_01M0DMPVXCK558FZPDKNPR9305`)
+has two environments — each a completely separate data store, an
+organisation created in one does not exist in the other — see
+`.env.example` for the exact client id/org id pair to use for each:
+
+- **Staging** (`environment_01M0DMPVXK5JCR5NGQYHDPKGPS`, organisation
+  `org_01M0DMQZE6GYX4PV7ZPG5JH6QN`) — the local-dev target. Its redirect
+  URI (`http://localhost:3000/auth/callback`), logout URI
+  (`http://localhost:3000/login`), and CORS web origin
+  (`http://localhost:3000`) are configured via the WorkOS management API,
+  not just documented — a real login redirect from a local `next dev` has
+  somewhere valid to land.
+- **Production** (`environment_01M0E0T12DMFWB5GJ3DTMVQFR4`, named
+  "NEO-LLYODS" in the WorkOS dashboard, organisation
+  `org_01M0E14TSTRZK9GEZRR7RWZPAK`) — created once a real secret key for
+  it was provided. **Its redirect/logout/CORS URIs are deliberately left
+  unconfigured**, because no real production domain exists yet to point
+  them at — setting them to a guessed placeholder would be worse than
+  leaving sign-in unusable there until a real domain exists. Configure
+  them (same `setRedirectUris`/`setLogoutUris`/`updateCorsConfig` calls
+  used for Staging) the moment a real domain is chosen.
+
+**A secret-handling note for whoever reads this next:** a WorkOS secret
+API key for the Production environment was pasted directly into a chat
+session during this work. It was never written to any file or committed,
+but per standard practice, treat any credential that has touched a chat
+transcript as compromised — **rotate it** in the WorkOS dashboard before
+relying on it, and prefer an env var or secrets manager over chat for any
+future key.
 
 **What is honestly not done, and why it can't be from here:**
 
