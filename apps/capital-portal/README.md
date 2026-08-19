@@ -36,3 +36,14 @@ rationale; this one covers what's specific to the capital-provider journey.
 npm install
 NEO_LLOYDS_API_URL=http://localhost:3001 npm -w @neo-lloyds/capital-portal run dev
 ```
+
+## WorkOS AuthKit sign-in (optional)
+
+The same "Sign in with WorkOS" path `apps/admin-portal` has, alongside —
+not replacing — the paste-a-credential login above. Same
+`WORKOS_CLIENT_ID`/`WORKOS_ORGANIZATION_ID` (a shared Neo-Lloyds WorkOS
+project/org), same bridge into the existing `nl_credential` cookie. See
+`apps/admin-portal/README.md`'s "WorkOS AuthKit sign-in" section for the
+full writeup, including what is honestly still unconfirmed (the real
+`OIDC_ISSUER_URL` value, and a live browser round-trip — this sandbox has
+no network access to workos.com/api.workos.com).

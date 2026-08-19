@@ -269,9 +269,21 @@ corporate, admin), observability, and the security gaps listed in
   `apps/api/test/oidc-auth.test.ts` proves it end-to-end with a real
   RS256 key pair and signed tokens; a live run against real PostgreSQL
   (migration `20260819090000_0011_oidc_user_links`) confirmed the same
-  flow through the actual running API. `docs/security-model.md` §10 is
-  explicit about what this does and does not close: no registered
-  real-world identity provider, no browser-side login flow. The rest of
+  flow through the actual running API. `docs/security-model.md` §10 was
+  then updated again: a real WorkOS project and organisation ("Neo-Lloyds")
+  now exist (created via the WorkOS MCP connector, since this sandbox has
+  no direct network egress to workos.com/api.workos.com), and all five
+  portals gained a "Sign in with WorkOS" path via
+  `@workos-inc/authkit-nextjs`, additive alongside each portal's existing
+  paste-a-credential login — a bridge route turns a successful WorkOS
+  sign-in into the same session cookie every portal already used. The
+  environment's redirect/logout URIs and CORS origin were configured for
+  real via the WorkOS management API, and the real AuthKit JWKS URL was
+  confirmed from `@workos-inc/node`'s installed source rather than
+  guessed. What's still open: the real `OIDC_ISSUER_URL` a decoded token
+  would carry (unconfirmable from here — WorkOS's own SDK verifies by
+  signature only), and a live browser round-trip, which every other
+  feature in this repository has and this one still doesn't. The rest of
   §8's list (real KYB/KYC, sanctions screening, an HSM/secrets manager, a
   penetration test, a real reinsurer counterparty, real settlement,
   regulatory licensing) is unchanged and, per §8, not closable by more

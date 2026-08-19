@@ -76,3 +76,14 @@ or `BROKER`.
   intentionally plain, utilitarian CSS — enough to be legible and usable,
   not a component library or brand decision. That is a real decision for
   whoever owns product design, not something to default silently.
+
+## WorkOS AuthKit sign-in (optional)
+
+The same "Sign in with WorkOS" path `apps/admin-portal` has, alongside —
+not replacing — the paste-a-credential login above. Same
+`WORKOS_CLIENT_ID`/`WORKOS_ORGANIZATION_ID` (a shared Neo-Lloyds WorkOS
+project/org), same bridge into the existing `nl_credential` cookie. See
+`apps/admin-portal/README.md`'s "WorkOS AuthKit sign-in" section for the
+full writeup, including what is honestly still unconfirmed (the real
+`OIDC_ISSUER_URL` value, and a live browser round-trip — this sandbox has
+no network access to workos.com/api.workos.com).

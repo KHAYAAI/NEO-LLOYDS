@@ -1,4 +1,5 @@
 import { LoginForm } from './login-form';
+import { signInWithWorkos } from './workos-actions';
 
 export default function LoginPage() {
   return (
@@ -6,6 +7,21 @@ export default function LoginPage() {
       <div className="nl-header">
         <h1>Neo-Lloyds Claims Administrator Portal</h1>
       </div>
+
+      {process.env.WORKOS_CLIENT_ID ? (
+        <div className="nl-panel">
+          <p className="nl-muted" style={{ marginTop: 0 }}>
+            Sign in with your organisation&rsquo;s identity provider via WorkOS AuthKit
+            (docs/security-model.md §10).
+          </p>
+          <form action={signInWithWorkos}>
+            <button className="nl-button" type="submit">
+              Sign in with WorkOS
+            </button>
+          </form>
+        </div>
+      ) : null}
+
       <div className="nl-panel">
         <p className="nl-muted" style={{ marginTop: 0 }}>
           Paste an API credential issued via <code>POST /identity/organisations/:id/credentials</code>{' '}

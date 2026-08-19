@@ -66,12 +66,27 @@ is real and tested (`apps/api/src/common/oidc.ts`,
 `apps/api/test/oidc-auth.test.ts`) — genuine JWT signature/issuer/
 audience/expiry verification via `jose`, alongside the original API-key
 credential path — see `docs/security-model.md` §10 for exactly what that
-does and doesn't close (no registered real-world identity provider, no
-browser login flow yet). Everything else in §8 — real KYB/KYC, sanctions
-screening, an HSM/secrets manager, a penetration test, a real reinsurer
-counterparty, real settlement, and regulatory licensing — remains an
-external integration or legal/business process, not something addable by
-more code alone; §8 explains why for each.
+does and doesn't close. **A real WorkOS project and organisation named
+"Neo-Lloyds" now back a browser-side login flow**, wired into all five
+portals via `@workos-inc/authkit-nextjs`, additive alongside each
+portal's existing paste-a-credential login: a click on "Sign in with
+WorkOS" redirects to a real, registered WorkOS AuthKit login, and a
+successful sign-in bridges the resulting access token into the same
+session cookie every portal already used. The redirect URI, logout URI,
+and CORS origin for local dev are configured on the real WorkOS
+environment (via the WorkOS MCP connector, since this sandbox has no
+direct network egress to workos.com/api.workos.com), and the real AuthKit
+JWKS URL was confirmed by reading `@workos-inc/node`'s installed source
+directly rather than guessed. What's still honestly open, stated in
+`apps/admin-portal/README.md`: the exact `OIDC_ISSUER_URL` a real decoded
+token would carry (WorkOS's own SDK verifies by signature only, so there
+was no ground truth to confirm it against from here), and a live
+end-to-end browser verification — the one thing every other feature in
+this repository has and this one doesn't. Everything else in §8 — real
+KYB/KYC, sanctions screening, an HSM/secrets manager, a penetration test,
+a real reinsurer counterparty, real settlement, and regulatory licensing
+— remains an external integration or legal/business process, not
+something addable by more code alone; §8 explains why for each.
 
 Each phase is built vertically: domain logic, migrations where applicable,
 API, authn/authz, audit logging, error handling, docs and a passing test
