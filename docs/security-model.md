@@ -101,26 +101,41 @@ has been closed as of the hardening pass in this section's changelog.
 
 None of the remaining items are closable by more code alone:
 
-- **KYB/KYC and sanctions screening still need a signed contract with a
-  vendor** (e.g. Onfido, ComplyAdvantage, Refinitiv World-Check) and their
-  live API credentials — that part hasn't changed. **What has changed:**
-  the `KybProvider`/`SanctionsProvider` interface this section used to
+- **KYB is now real for one vendor (Didit); sanctions screening still needs
+  a signed contract.** `apps/api/src/compliance/didit.ts` is a working
+  `KybProvider` adapter for Didit (didit.me) — not a stub. It was built
+  against two live sandbox calls made through Didit's own MCP connector
+  (`didit_verify_kyb_search` / `didit_verify_kyb_select`, country GB,
+  company "Tesco"), and the response types it decodes match those real
+  JSON payloads exactly, not a guess. `createKybProvider()` picks it up
+  automatically once `DIDIT_API_KEY` is set (`.env.example`). What is
+  honestly still unconfirmed: the exact REST base URL/endpoint paths a
+  deployed server should call — `docs.didit.me`, `verification.didit.me`
+  and `apidocs.didit.me` were all unreachable from the sandbox that wrote
+  this (network egress blocked or DNS failure), and no official
+  server-side Didit Node SDK exists on npm to read them from (checked:
+  only client-side widget SDKs exist). `DIDIT_KYB_SEARCH_URL`/
+  `DIDIT_KYB_SELECT_URL` therefore have no default and must be confirmed
+  from the Didit dashboard's own API reference before this runs for real
+  — same reasoning as leaving `OIDC_ISSUER_URL` unset for WorkOS. Sanctions
+  screening has no adapter yet and still needs a signed vendor contract
+  (e.g. ComplyAdvantage, Refinitiv World-Check) and live API credentials.
+  The `KybProvider`/`SanctionsProvider` interface this section used to
   describe as a next step now exists
   (`apps/api/src/compliance/providers.ts`), mirroring `SettlementProvider`
   (§9 of `docs/reports/phase-10.md`) and `AnalystProvider` exactly — a
-  `Null` implementation ships today (`NullKybProvider`,
-  `NullSanctionsProvider`), wired into a real code path
+  `Null` implementation ships as the fallback for both
+  (`NullKybProvider`, `NullSanctionsProvider`), wired into a real code path
   (`IdentityService.runComplianceChecks`,
   `POST /identity/organisations/:id/compliance/check`) that records what a
   provider reports without ever changing `kybStatus` itself — that remains
-  the separate, explicit `setKybStatus` admin action, unchanged. A real
-  vendor adapter is one class away from being dropped in behind the same
-  interface; `createKybProvider`/`createSanctionsProvider` deliberately
-  throw at startup if a `*_PROVIDER_API_KEY` is set with no adapter
-  implemented, rather than silently no-op with a real key configured. The
-  `screened: false` field on `SanctionsScreeningResult` exists specifically
-  so an empty `hits: []` from the null provider can never be misread as
-  "screened clean" by anything downstream.
+  the separate, explicit `setKybStatus` admin action, unchanged.
+  `createKybProvider`/`createSanctionsProvider` deliberately throw at
+  startup if a key is set with no adapter behind it (or, for Didit,
+  without both endpoint URLs), rather than silently no-op with a real key
+  configured. The `screened: false` field on `SanctionsScreeningResult`
+  exists specifically so an empty `hits: []` from the null provider can
+  never be misread as "screened clean" by anything downstream.
 - **An HSM/secrets manager** (AWS KMS/Secrets Manager, HashiCorp Vault,
   GCP Secret Manager) is an infrastructure choice tied to wherever this is
   actually deployed; picking one before a deployment target exists would be

@@ -22,6 +22,8 @@
  * of `[]` must never be read as "screened clean" — see `screened` below.
  */
 
+import { createDiditKybProviderFromEnv } from './didit.js';
+
 export type KybVerdict = 'NOT_INTEGRATED' | 'VERIFIED' | 'REJECTED' | 'REQUIRES_REVIEW';
 
 export interface KybCheckResult {
@@ -85,14 +87,18 @@ export class NullSanctionsProvider implements SanctionsProvider {
 }
 
 /**
- * If a KYB_PROVIDER_API_KEY is set but no real adapter class exists yet,
- * fail loudly rather than silently behave like the null provider — an
- * operator who set a real key is trying to turn real screening on, and a
- * quiet no-op would be a worse failure mode than a startup error (the same
- * "no opinion beats a made-up opinion" reasoning ADR-0006 applies to the AI
- * analyst applies here).
+ * Wiring order: a real Didit adapter first (apps/api/src/compliance/didit.ts,
+ * built against live sandbox calls through Didit's own MCP connector), then
+ * the same fail-loudly guard as before for any other vendor whose key got
+ * set without an adapter to match. An operator who set a real key is trying
+ * to turn real screening on, and a quiet no-op would be a worse failure
+ * mode than a startup error (the same "no opinion beats a made-up opinion"
+ * reasoning ADR-0006 applies to the AI analyst applies here).
  */
 export function createKybProvider(): KybProvider {
+  const didit = createDiditKybProviderFromEnv();
+  if (didit) return didit;
+
   if (process.env['KYB_PROVIDER_API_KEY']) {
     throw new Error(
       'KYB_PROVIDER_API_KEY is set, but no real KybProvider adapter is implemented yet ' +
