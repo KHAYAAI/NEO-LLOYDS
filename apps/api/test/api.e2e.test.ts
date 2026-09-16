@@ -657,6 +657,21 @@ describe('identity and governance', () => {
     expect(record?.reason).toContain('NOT_INTEGRATED');
   });
 
+  it('reports an unscreened wallet via the (null) WalletScreeningProvider, not a fabricated clean result', async () => {
+    const response = await authed()
+      .post('/compliance/wallet-screening')
+      .send({ walletAddress: '0xabc', blockchain: 'ETH' })
+      .expect(201);
+    expect(response.body.result).toMatchObject({ providerId: 'null-provider', screened: false });
+  });
+
+  it('refuses to hand back a fake verification-session URL when no real provider is configured', async () => {
+    const response = await authed()
+      .post('/compliance/verification-sessions')
+      .send({ workflowId: 'w', vendorData: 'v' });
+    expect(response.status).toBe(500);
+  });
+
   it('writes an audit record for every material action', async () => {
     const before = audit.records.length;
     await authed()

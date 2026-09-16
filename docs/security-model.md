@@ -147,6 +147,27 @@ None of the remaining items are closable by more code alone:
   configured. The `screened: false` field on `SanctionsScreeningResult`
   exists specifically so an empty `hits: []` from the null provider can
   never be misread as "screened clean" by anything downstream.
+- **Two more Didit capabilities closed, one genuinely different in kind.**
+  `WalletScreeningProvider` (Travel Rule counterparty due diligence for a
+  stablecoin settlement leg — relevant only once real settlement exists)
+  is a real, synchronous adapter, verified the same way as KYB/AML
+  through `didit_transaction_screen_wallet`, and reachable today at
+  `POST /compliance/wallet-screening` — it is not yet wired into
+  `SettlementService`, which would need a destination-wallet field added
+  to the settlement schema, a real change this repository has not made.
+  `VerificationSessionProvider` (`POST /compliance/verification-sessions`)
+  is architecturally different from every provider above: KYC document
+  verification and Didit's Bank Verification add-on (confirmed live, via
+  `didit_workflow_create`, to be **not enabled** on the connected
+  account) are both hosted, redirect-based flows a human has to complete
+  — a server can only start the session and hand back a URL. There is
+  deliberately no Null fallback that returns something usable here: a
+  fake session URL sent to a real signatory would be actively misleading,
+  unlike an honest "not screened" result, so `createSession()` throws
+  when unconfigured instead. Completing the loop — learning a session's
+  outcome — needs a webhook receiver, which does not exist anywhere in
+  this codebase yet; that is real, separate work this section does not
+  claim to have done.
 - **An HSM/secrets manager** (AWS KMS/Secrets Manager, HashiCorp Vault,
   GCP Secret Manager) is an infrastructure choice tied to wherever this is
   actually deployed; picking one before a deployment target exists would be

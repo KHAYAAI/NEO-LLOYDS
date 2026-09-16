@@ -22,7 +22,12 @@
  * of `[]` must never be read as "screened clean" — see `screened` below.
  */
 
-import { createDiditKybProviderFromEnv, createDiditSanctionsProviderFromEnv } from './didit.js';
+import {
+  createDiditKybProviderFromEnv,
+  createDiditSanctionsProviderFromEnv,
+  createDiditVerificationSessionProviderFromEnv,
+  createDiditWalletScreeningProviderFromEnv,
+} from './didit.js';
 
 export type KybVerdict = 'NOT_INTEGRATED' | 'VERIFIED' | 'REJECTED' | 'REQUIRES_REVIEW';
 
@@ -121,4 +126,103 @@ export function createSanctionsProvider(): SanctionsProvider {
     );
   }
   return new NullSanctionsProvider();
+}
+
+/**
+ * Counterparty due diligence for a crypto wallet on a stablecoin/on-chain
+ * settlement leg (FATF Travel Rule: `SettlementMethod = 'STABLECOIN'` in
+ * `@neo-lloyds/domain`). Not wired into `SettlementService.initiate` yet —
+ * that would need a destination-wallet field added to the settlement
+ * input/persistence layer, a real schema change this repository has not
+ * made — but the provider itself is real and callable today via
+ * `POST /compliance/wallet-screening` (`apps/api/src/compliance/compliance.controller.ts`).
+ */
+export interface WalletScreeningResult {
+  readonly providerId: string;
+  readonly screened: boolean;
+  readonly riskScore: number | null;
+  readonly severity: string | null;
+  readonly sanctionsHit: boolean;
+  readonly screenedAt: string;
+}
+
+export interface WalletScreeningProvider {
+  readonly providerId: string;
+  screenWallet(input: { walletAddress: string; blockchain: string }): Promise<WalletScreeningResult>;
+}
+
+export class NullWalletScreeningProvider implements WalletScreeningProvider {
+  readonly providerId = 'null-provider';
+
+  async screenWallet(): Promise<WalletScreeningResult> {
+    return {
+      providerId: this.providerId,
+      screened: false,
+      riskScore: null,
+      severity: null,
+      sanctionsHit: false,
+      screenedAt: new Date().toISOString(),
+    };
+  }
+}
+
+export function createWalletScreeningProvider(): WalletScreeningProvider {
+  const didit = createDiditWalletScreeningProviderFromEnv();
+  if (didit) return didit;
+
+  if (process.env['WALLET_SCREENING_PROVIDER_API_KEY']) {
+    throw new Error(
+      'WALLET_SCREENING_PROVIDER_API_KEY is set, but no real WalletScreeningProvider adapter ' +
+        'is implemented yet. Unset it to use NullWalletScreeningProvider, or implement an ' +
+        'adapter class and wire it in here.',
+    );
+  }
+  return new NullWalletScreeningProvider();
+}
+
+/**
+ * Creates a hosted, redirect-based verification session (Didit's KYC
+ * document/liveness flow today; bank-account-ownership verification once
+ * that add-on is enabled on the connected Didit account — confirmed live
+ * via didit_workflow_create that it is NOT enabled today, see
+ * apps/api/src/compliance/didit.ts). This is a genuinely different shape
+ * from KybProvider/SanctionsProvider: those are synchronous checks this
+ * server can complete in one request/response, but a human has to
+ * actually go photograph a document or connect their bank, so the only
+ * thing a server can do synchronously is start the session and hand back
+ * a URL. **Completing the loop — learning the outcome — needs a webhook
+ * receiver, which does not exist anywhere in this codebase yet
+ * (confirmed: no route grep-matches "webhook" outside
+ * apps/api/src/settlement's doc comments).** That is real, separate work,
+ * not implied by this interface's existence.
+ */
+export interface VerificationSession {
+  readonly providerId: string;
+  readonly sessionId: string;
+  readonly url: string;
+  readonly status: string;
+}
+
+export interface VerificationSessionProvider {
+  readonly providerId: string;
+  createSession(input: { workflowId: string; vendorData: string }): Promise<VerificationSession>;
+}
+
+export class NullVerificationSessionProvider implements VerificationSessionProvider {
+  readonly providerId = 'null-provider';
+
+  async createSession(): Promise<VerificationSession> {
+    throw new Error(
+      'No VerificationSessionProvider is configured -- there is no null/simulated hosted ' +
+        'verification flow (unlike KybProvider/SanctionsProvider, a fake session URL would be ' +
+        'actively misleading to send to a real person). Set DIDIT_API_KEY and ' +
+        'DIDIT_SESSION_CREATE_URL to enable one.',
+    );
+  }
+}
+
+export function createVerificationSessionProvider(): VerificationSessionProvider {
+  const didit = createDiditVerificationSessionProviderFromEnv();
+  if (didit) return didit;
+  return new NullVerificationSessionProvider();
 }

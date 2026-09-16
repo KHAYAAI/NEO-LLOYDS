@@ -58,6 +58,8 @@ which may read across tenants (every such read is audited) but never write.
 | POST | `/identity/organisations/:id/credentials` | `identity:admin` | Returns the secret **once** |
 | POST | `/identity/organisations/:id/oidc-users` | `identity:admin` | Links a human at a configured OIDC issuer (`OIDC_ISSUER_URL`) to this organisation — security-model.md §10. No self-registration. |
 | POST | `/identity/organisations/:id/compliance/check` | `identity:admin` | Runs the configured KYB/sanctions providers and records what they report — security-model.md §8. Informational only: never changes `kybStatus` itself, unlike `POST .../kyb`. |
+| POST | `/compliance/wallet-screening` | `identity:admin` | Screens a crypto wallet for sanctions/AML risk (Travel Rule counterparty due diligence). Not yet wired into settlement — a standalone check. |
+| POST | `/compliance/verification-sessions` | `identity:admin` | Starts a hosted Didit verification session (KYC, or bank-account-ownership once enabled) and returns its URL. No webhook receiver exists yet to learn the outcome — check the Didit dashboard. |
 | POST | `/identity/credentials/:keyId/revoke` | `identity:admin` | Takes effect immediately |
 | POST | `/identity/mandates` | `identity:admin` | Only the principal may mandate its agent |
 | GET | `/identity/audit` | `audit:read` | Append-only log, newest first; regulators see across tenants |

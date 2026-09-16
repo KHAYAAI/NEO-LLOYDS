@@ -36,8 +36,14 @@ import { SettlementController } from './settlement/settlement.controller.js';
 import { SettlementService } from './settlement/settlement.service.js';
 import { SETTLEMENT_PROVIDER } from './settlement/tokens.js';
 import { createSettlementProvider } from './settlement/providers.js';
-import { KYB_PROVIDER, SANCTIONS_PROVIDER } from './compliance/tokens.js';
-import { createKybProvider, createSanctionsProvider } from './compliance/providers.js';
+import { KYB_PROVIDER, SANCTIONS_PROVIDER, WALLET_SCREENING_PROVIDER, VERIFICATION_SESSION_PROVIDER } from './compliance/tokens.js';
+import {
+  createKybProvider,
+  createSanctionsProvider,
+  createWalletScreeningProvider,
+  createVerificationSessionProvider,
+} from './compliance/providers.js';
+import { ComplianceController } from './compliance/compliance.controller.js';
 import { AgentController } from './agent/agent.controller.js';
 import { AgentService } from './agent/agent.service.js';
 import { JurisdictionController } from './jurisdiction/jurisdiction.controller.js';
@@ -95,6 +101,7 @@ const CONTROLLERS = [
   OntologyController,
   JurisdictionController,
   IdentityController,
+  ComplianceController,
   GraphController,
   ScoringController,
   SubmissionController,
@@ -152,6 +159,8 @@ export class AppModule {
     settlementProvider?: unknown;
     kybProvider?: unknown;
     sanctionsProvider?: unknown;
+    walletScreeningProvider?: unknown;
+    verificationSessionProvider?: unknown;
     extra?: unknown[];
   }): DynamicModule {
     return {
@@ -190,6 +199,14 @@ export class AppModule {
           provide: SANCTIONS_PROVIDER,
           useValue: providers.sanctionsProvider ?? createSanctionsProvider(),
         },
+        {
+          provide: WALLET_SCREENING_PROVIDER,
+          useValue: providers.walletScreeningProvider ?? createWalletScreeningProvider(),
+        },
+        {
+          provide: VERIFICATION_SESSION_PROVIDER,
+          useValue: providers.verificationSessionProvider ?? createVerificationSessionProvider(),
+        },
         { provide: OidcVerifier, useFactory: () => new OidcVerifier() },
         { provide: APP_GUARD, useClass: ApiCredentialGuard },
         ...((providers.extra ?? []) as never[]),
@@ -224,6 +241,8 @@ export class AppModule {
         { provide: SETTLEMENT_PROVIDER, useFactory: createSettlementProvider },
         { provide: KYB_PROVIDER, useFactory: createKybProvider },
         { provide: SANCTIONS_PROVIDER, useFactory: createSanctionsProvider },
+        { provide: WALLET_SCREENING_PROVIDER, useFactory: createWalletScreeningProvider },
+        { provide: VERIFICATION_SESSION_PROVIDER, useFactory: createVerificationSessionProvider },
         { provide: OidcVerifier, useFactory: () => new OidcVerifier() },
         { provide: APP_GUARD, useClass: ApiCredentialGuard },
       ],

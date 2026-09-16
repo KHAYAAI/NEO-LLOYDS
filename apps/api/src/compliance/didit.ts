@@ -1,5 +1,7 @@
 import type { KybCheckResult, KybProvider, KybVerdict } from './providers.js';
 import type { SanctionsHit, SanctionsProvider, SanctionsScreeningResult } from './providers.js';
+import type { WalletScreeningProvider, WalletScreeningResult } from './providers.js';
+import type { VerificationSession, VerificationSessionProvider } from './providers.js';
 
 /**
  * A real `KybProvider` adapter for Didit (didit.me), built against its own
@@ -236,4 +238,138 @@ export function createDiditSanctionsProviderFromEnv(
     );
   }
   return new DiditSanctionsProvider(apiKey, screenUrl);
+}
+
+/**
+ * Wallet-screening / Travel Rule counterparty due diligence, verified
+ * live against the sandbox through `didit_transaction_screen_wallet`
+ * (blockchain "ETH", a real-format address) -- unlike KYB search and AML
+ * screening, this call succeeded with no additional setup ("Requires
+ * transaction monitoring to be configured (a provider key) or returns
+ * 409" per the MCP tool's own description, but the sandbox app screened
+ * it directly). `DiditWalletScreenResponse` below is typed against that
+ * real response body verbatim -- `provider: "merklescience"`,
+ * `sanctions_hit`, `pep_counterparty`, `risk_score`, `severity`, and a
+ * `summary` explicitly stating "Sandbox demo screening result - no real
+ * AML provider was called" (so a live/production key would presumably
+ * exercise the real Merkle Science integration this response already
+ * shows the shape of).
+ */
+interface DiditWalletScreenResponse {
+  readonly provider: string;
+  readonly risk_score: number | null;
+  readonly severity: string | null;
+  readonly status: string;
+  readonly sanctions_hit: boolean;
+}
+
+export class DiditWalletScreeningProvider implements WalletScreeningProvider {
+  readonly providerId = 'didit';
+
+  constructor(
+    private readonly apiKey: string,
+    private readonly screenUrl: string,
+  ) {}
+
+  async screenWallet(input: { walletAddress: string; blockchain: string }): Promise<WalletScreeningResult> {
+    const response = await fetch(this.screenUrl, {
+      method: 'POST',
+      headers: { 'x-api-key': this.apiKey, 'content-type': 'application/json' },
+      // wallet_address/blockchain match the live-verified didit_transaction_screen_wallet request shape.
+      body: JSON.stringify({ wallet_address: input.walletAddress, blockchain: input.blockchain }),
+    });
+    if (!response.ok) {
+      throw new Error(`Didit wallet screening returned ${response.status}`);
+    }
+    const body = (await response.json()) as DiditWalletScreenResponse;
+
+    return {
+      providerId: this.providerId,
+      screened: true,
+      riskScore: body.risk_score,
+      severity: body.severity,
+      sanctionsHit: body.sanctions_hit,
+      screenedAt: new Date().toISOString(),
+    };
+  }
+}
+
+export function createDiditWalletScreeningProviderFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): DiditWalletScreeningProvider | undefined {
+  const apiKey = env['DIDIT_API_KEY'];
+  if (!apiKey) return undefined;
+
+  const screenUrl = env['DIDIT_WALLET_SCREEN_URL'];
+  if (!screenUrl) {
+    throw new Error(
+      'DIDIT_API_KEY is set, but DIDIT_WALLET_SCREEN_URL is not. Get the exact wallet-screening ' +
+        "endpoint path from your Didit dashboard's API reference and set it.",
+    );
+  }
+  return new DiditWalletScreeningProvider(apiKey, screenUrl);
+}
+
+/**
+ * Hosted verification-session creation (KYC document/liveness flow, or
+ * bank-account-ownership once Didit's Bank Verification add-on is enabled
+ * on this account -- confirmed live via `didit_workflow_create` with a
+ * `BANK_VERIFICATION` feature that it is NOT enabled today: "Bank
+ * Verification is not enabled on this deployment yet"). A real,
+ * published KYC workflow was created for this
+ * (`workflow_id: 477652f9-44b7-4242-b9c4-76bb536d7be9`, "Neo-Lloyds
+ * Signatory KYC" -- OCR, LIVENESS, FACE_MATCH), and a real session was
+ * created against it through `didit_session_create`
+ * (`session_id: e1c69898-61af-49eb-b0bb-40de6af44e65`,
+ * `url: https://verify.didit.me/session/M2_jzVEhncH3`) -- the response
+ * type below matches that verbatim.
+ *
+ * The request-side endpoint path is NOT confirmed the way the response
+ * shape is -- same reason as every other Didit adapter in this file
+ * (docs.didit.me unreachable, no official server SDK). One additional,
+ * weaker signal exists here that doesn't for KYB/AML/wallet screening: a
+ * third-party (unofficial, unverified) published package,
+ * `@canton-vc/adapter-didit` on npm, documents wrapping "the Didit v3
+ * sessions API (POST /v3/session/, GET /v3/session/{id}/decision/)".
+ * That is someone else's reverse-engineering, not Didit's own word, and
+ * is NOT relied on here -- `DIDIT_SESSION_CREATE_URL` still has no
+ * default, for the same reason the other endpoint URLs don't.
+ */
+export class DiditVerificationSessionProvider implements VerificationSessionProvider {
+  readonly providerId = 'didit';
+
+  constructor(
+    private readonly apiKey: string,
+    private readonly createUrl: string,
+  ) {}
+
+  async createSession(input: { workflowId: string; vendorData: string }): Promise<VerificationSession> {
+    const response = await fetch(this.createUrl, {
+      method: 'POST',
+      headers: { 'x-api-key': this.apiKey, 'content-type': 'application/json' },
+      body: JSON.stringify({ workflow_id: input.workflowId, vendor_data: input.vendorData }),
+    });
+    if (!response.ok) {
+      throw new Error(`Didit session creation returned ${response.status}`);
+    }
+    const body = (await response.json()) as { session_id: string; url: string; status: string };
+
+    return { providerId: this.providerId, sessionId: body.session_id, url: body.url, status: body.status };
+  }
+}
+
+export function createDiditVerificationSessionProviderFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): DiditVerificationSessionProvider | undefined {
+  const apiKey = env['DIDIT_API_KEY'];
+  if (!apiKey) return undefined;
+
+  const createUrl = env['DIDIT_SESSION_CREATE_URL'];
+  if (!createUrl) {
+    throw new Error(
+      'DIDIT_API_KEY is set, but DIDIT_SESSION_CREATE_URL is not. Get the exact session-creation ' +
+        "endpoint path from your Didit dashboard's API reference and set it.",
+    );
+  }
+  return new DiditVerificationSessionProvider(apiKey, createUrl);
 }
