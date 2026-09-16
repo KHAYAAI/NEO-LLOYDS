@@ -1465,6 +1465,7 @@ export class PrismaSettlementRepository implements SettlementRepository {
     netAmountMinor: bigint;
     currency: string;
     providerRef: string | null;
+    destinationAccountId: string | null;
     failureReason: string | null;
     createdAt: Date;
     updatedAt: Date;
@@ -1480,6 +1481,7 @@ export class PrismaSettlementRepository implements SettlementRepository {
       fee: money(Number(row.feeMinor), row.currency),
       netAmount: money(Number(row.netAmountMinor), row.currency),
       providerRef: row.providerRef,
+      destinationAccountId: row.destinationAccountId,
       failureReason: row.failureReason,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -1495,6 +1497,7 @@ export class PrismaSettlementRepository implements SettlementRepository {
     grossAmount: Money;
     fee: Money;
     netAmount: Money;
+    destinationAccountId?: string | null;
   }): Promise<StoredSettlementTransaction> {
     const row = await this.prisma.settlementTransaction.create({
       data: {
@@ -1507,6 +1510,7 @@ export class PrismaSettlementRepository implements SettlementRepository {
         feeMinor: BigInt(input.fee.amountMinor),
         netAmountMinor: BigInt(input.netAmount.amountMinor),
         currency: input.grossAmount.currency,
+        destinationAccountId: input.destinationAccountId ?? null,
       },
     });
     return this.toDomain(row);

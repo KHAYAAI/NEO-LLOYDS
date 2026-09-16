@@ -92,15 +92,39 @@ EU) and the storage layer honours them per-organisation.
 Stated plainly rather than papered over: no real KYB/KYC provider, no
 sanctions screening integration, no HSM for key material, no secrets
 manager, no penetration testing, no real reinsurer counterparty, no
-regulatory licensing, and settlement still has exactly one implementation
-(`NullSettlementProvider` — no real money moves). These are tracked in
-`docs/roadmap.md` and must be closed before any non-simulated use.
-**OIDC/SSO login is the one item that moved off this list** — §10 covers
-what is now real and what is still an external dependency. §9 records what
-has been closed as of the hardening pass in this section's changelog.
+regulatory licensing, and settlement has one real adapter (Stripe Connect
+Transfers) alongside the honest `NullSettlementProvider` fallback — see
+below for exactly what that does and doesn't mean; real money still does
+not move without a Stripe account and a connected destination. These are
+tracked in `docs/roadmap.md` and must be closed before any non-simulated
+use. **OIDC/SSO login is the one item that moved fully off this list** —
+§10 covers what is now real and what is still an external dependency. §9
+records what has been closed as of the hardening pass in this section's
+changelog.
 
 None of the remaining items are closable by more code alone:
 
+- **Settlement now has a real adapter for one rail (Stripe Connect
+  Transfers), with two honest limits.** `apps/api/src/settlement/stripe.ts`
+  calls Stripe's real `POST /v1/transfers` — base URL, auth header, the
+  form-encoded (not JSON) body, and the `Idempotency-Key` convention were
+  all read directly from the official `stripe` npm package's installed
+  source (`api.stripe.com` was unreachable from this sandbox), the same
+  tier of ground truth `@workos-inc/node` gave the OIDC JWKS URL. Two
+  things keep this from moving real money today regardless of
+  configuration: (1) `STABLECOIN` is refused outright — Stripe does not
+  move crypto, and this provider says so rather than pretending; (2) a
+  transfer needs a Stripe Connect `destinationAccountId`, which
+  `SettlementService.initiate`/`POST /settlement/transactions` now
+  accept and persist (migration `20260916170000_0012_settlement_destination_account`,
+  verified live against real PostgreSQL), but nothing in Neo-Lloyds
+  populates one automatically — onboarding a capital provider onto
+  Stripe Connect (their own KYC with Stripe, account linking) is real,
+  separate work not attempted here. And unlike the Didit adapters, this
+  one has never been run against a real Stripe account, sandbox or live,
+  from this repository — the request/response shapes are typed against
+  Stripe's own published TypeScript definitions, which is strong evidence,
+  not a substitute for one real call.
 - **Both KYB and sanctions screening are now real for one vendor
   (Didit).** `apps/api/src/compliance/didit.ts` has two working adapters,
   not stubs: `DiditKybProvider` (registry lookup) and

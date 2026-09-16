@@ -745,10 +745,12 @@ export class InMemorySettlementRepository implements SettlementRepository {
     grossAmount: Money;
     fee: Money;
     netAmount: Money;
+    destinationAccountId?: string | null;
   }): Promise<StoredSettlementTransaction> {
     const now = new Date();
     const transaction: StoredSettlementTransaction = {
       ...input,
+      destinationAccountId: input.destinationAccountId ?? null,
       status: 'PENDING',
       providerRef: null,
       failureReason: null,

@@ -410,6 +410,7 @@ export interface StoredSettlementTransaction {
   fee: Money;
   netAmount: Money;
   providerRef: string | null;
+  destinationAccountId: string | null;
   failureReason: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -425,6 +426,7 @@ export interface SettlementRepository {
     grossAmount: Money;
     fee: Money;
     netAmount: Money;
+    destinationAccountId?: string | null;
   }): Promise<StoredSettlementTransaction>;
   find(id: string): Promise<StoredSettlementTransaction | undefined>;
   listByOrganisation(organisationId: string): Promise<StoredSettlementTransaction[]>;

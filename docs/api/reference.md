@@ -225,7 +225,7 @@ gross loss exactly.
 
 | Method | Path | Scope / roles | Notes |
 |---|---|---|---|
-| POST | `/settlement/transactions` | `settlement:write` + `CLAIMS_ADMINISTRATOR`/`SETTLEMENT_PROVIDER` | Initiates a settlement: `method` (`BANK_TRANSFER`, `DIGITAL_MONEY`, or `STABLECOIN`), `grossAmountMinor`, `currency`, optional `claimPayoutClaimId`/`claimPayoutOrganisationId` link, optional `feeFlatMinor`/`feeBps` override (default: $0.50 flat + 0.25%). Computes the fee, records the transaction, and submits it to the configured provider synchronously — the response reflects the final `CONFIRMED`/`FAILED` status. |
+| POST | `/settlement/transactions` | `settlement:write` + `CLAIMS_ADMINISTRATOR`/`SETTLEMENT_PROVIDER` | Initiates a settlement: `method` (`BANK_TRANSFER`, `DIGITAL_MONEY`, or `STABLECOIN`), `grossAmountMinor`, `currency`, optional `claimPayoutClaimId`/`claimPayoutOrganisationId` link, optional `feeFlatMinor`/`feeBps` override (default: $0.50 flat + 0.25%), optional `destinationAccountId` (e.g. a Stripe Connect account id — required for `StripeSettlementProvider` to actually submit a transfer; see security-model.md §8). Computes the fee, records the transaction, and submits it to the configured provider synchronously — the response reflects the final `CONFIRMED`/`FAILED` status. |
 | GET | `/settlement/transactions/:id` | `settlement:read` | |
 | GET | `/settlement/transactions` | `settlement:read` | Lists the caller's organisation's transactions, most recent first. |
 

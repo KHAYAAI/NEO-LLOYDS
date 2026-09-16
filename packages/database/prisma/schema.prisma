@@ -731,6 +731,12 @@ model SettlementTransaction {
   /// The provider's own reference for this transaction, once submitted —
   /// null until SUBMITTED. Format is provider-specific and opaque here.
   providerRef      String?
+  /// The real-money-rail account this settlement pays out to (e.g. a
+  /// Stripe Connect account id) -- null for a settlement that never had
+  /// one, including everything settled before this column existed.
+  /// SettlementProvider.submit() cannot construct a real transfer without
+  /// it; see apps/api/src/settlement/stripe.ts.
+  destinationAccountId String?
   /// Human-readable detail on a FAILED transaction, if the provider gave one.
   failureReason    String?
   createdAt        DateTime                   @default(now())

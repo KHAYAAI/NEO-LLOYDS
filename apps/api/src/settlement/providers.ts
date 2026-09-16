@@ -1,13 +1,15 @@
 import type { SettlementMethod } from '@neo-lloyds/domain';
+import { createStripeSettlementProviderFromEnv } from './stripe.js';
 
 /**
  * The `SettlementProvider` port: what actually moves money for a given
- * settlement method. This phase ships exactly one honest implementation —
- * `NullSettlementProvider`, which records everything precisely and moves
- * nothing — because no real bank, digital-money, or stablecoin integration
- * exists yet (docs/reports/phase-10.md). Same pattern as the AI analyst
- * provider (`apps/api/src/analyst/providers.ts`): degrade to a clearly
- * labelled no-op rather than fabricate a successful transfer.
+ * settlement method. `NullSettlementProvider` records everything precisely
+ * and moves nothing — the honest default when no real rail is configured.
+ * `StripeSettlementProvider` (apps/api/src/settlement/stripe.ts) is the
+ * first real implementation: Stripe Connect Transfers for BANK_TRANSFER/
+ * DIGITAL_MONEY. Same pattern as the AI analyst provider
+ * (`apps/api/src/analyst/providers.ts`): degrade to a clearly labelled
+ * no-op rather than fabricate a successful transfer.
  */
 export interface SettlementSubmissionResult {
   readonly providerRef: string;
@@ -17,7 +19,14 @@ export interface SettlementSubmissionResult {
 
 export interface SettlementProvider {
   readonly providerId: string;
-  submit(input: { transactionId: string; method: SettlementMethod; amountMinor: number; currency: string }): Promise<SettlementSubmissionResult>;
+  submit(input: {
+    transactionId: string;
+    method: SettlementMethod;
+    amountMinor: number;
+    currency: string;
+    /** e.g. a Stripe Connect account id. Absent for the Null provider or when no destination was configured on the transaction. */
+    destinationAccountId?: string;
+  }): Promise<SettlementSubmissionResult>;
 }
 
 /**
@@ -43,10 +52,17 @@ export class NullSettlementProvider implements SettlementProvider {
   }
 }
 
+/**
+ * Wiring order: a real Stripe adapter first when `STRIPE_API_KEY` is set
+ * (apps/api/src/settlement/stripe.ts — built against Stripe's own
+ * installed Node SDK source as ground truth, the same technique used for
+ * WorkOS's JWKS URL earlier in this project), then the honest Null
+ * fallback. No "key set but no adapter" throw is needed here the way
+ * compliance/providers.ts has one — Stripe is the one real adapter this
+ * port has, and its own factory already validates its own configuration.
+ */
 export function createSettlementProvider(): SettlementProvider {
-  // No real bank/digital-money/stablecoin integration is configured for
-  // this prototype (docs/security-model.md's honesty pattern applies here
-  // exactly as it does to SSO §10): a fake success from a fake bank
-  // connection would be worse than an explicit simulated one.
+  const stripe = createStripeSettlementProviderFromEnv();
+  if (stripe) return stripe;
   return new NullSettlementProvider();
 }

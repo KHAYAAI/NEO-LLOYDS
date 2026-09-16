@@ -13,6 +13,7 @@ class InitiateSettlementDto {
   @IsOptional() @IsString() claimPayoutClaimId?: string;
   @IsOptional() @IsInt() @Min(0) feeFlatMinor?: number;
   @IsOptional() @IsInt() @Min(0) feeBps?: number;
+  @IsOptional() @IsString() destinationAccountId?: string;
 }
 
 function auth(req: RequestWithAuth): AuthContext {
@@ -40,6 +41,7 @@ export class SettlementController {
       claimPayoutClaimId: body.claimPayoutClaimId ?? null,
       method: body.method,
       grossAmount: { amountMinor: body.grossAmountMinor, currency: body.currency },
+      ...(body.destinationAccountId ? { destinationAccountId: body.destinationAccountId } : {}),
       ...(body.feeFlatMinor !== undefined || body.feeBps !== undefined
         ? { feeConfig: { flatMinor: body.feeFlatMinor ?? 0, bps: body.feeBps ?? 0 } }
         : {}),

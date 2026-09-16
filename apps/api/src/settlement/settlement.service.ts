@@ -52,6 +52,8 @@ export class SettlementService {
       method: SettlementMethod;
       grossAmount: Money;
       feeConfig?: SettlementFeeConfig;
+      /** e.g. a Stripe Connect account id — see StripeSettlementProvider. Omit for the Null provider or a method it can't move for real. */
+      destinationAccountId?: string;
     },
   ): Promise<StoredSettlementTransaction> {
     requireAnyRole(ctx, ['CLAIMS_ADMINISTRATOR', 'SETTLEMENT_PROVIDER']);
@@ -67,6 +69,7 @@ export class SettlementService {
       grossAmount: calc.grossAmount,
       fee: calc.fee,
       netAmount: calc.netAmount,
+      destinationAccountId: input.destinationAccountId ?? null,
     });
 
     requireSettlementTransition(transaction.status, 'SUBMITTED');
@@ -77,6 +80,7 @@ export class SettlementService {
       method: transaction.method,
       amountMinor: transaction.netAmount.amountMinor,
       currency: transaction.netAmount.currency,
+      destinationAccountId: transaction.destinationAccountId ?? undefined,
     });
 
     const finalStatus = result.succeeded ? 'CONFIRMED' : 'FAILED';
