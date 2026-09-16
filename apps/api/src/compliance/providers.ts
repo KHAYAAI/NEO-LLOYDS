@@ -22,7 +22,7 @@
  * of `[]` must never be read as "screened clean" — see `screened` below.
  */
 
-import { createDiditKybProviderFromEnv } from './didit.js';
+import { createDiditKybProviderFromEnv, createDiditSanctionsProviderFromEnv } from './didit.js';
 
 export type KybVerdict = 'NOT_INTEGRATED' | 'VERIFIED' | 'REJECTED' | 'REQUIRES_REVIEW';
 
@@ -110,6 +110,9 @@ export function createKybProvider(): KybProvider {
 }
 
 export function createSanctionsProvider(): SanctionsProvider {
+  const didit = createDiditSanctionsProviderFromEnv();
+  if (didit) return didit;
+
   if (process.env['SANCTIONS_PROVIDER_API_KEY']) {
     throw new Error(
       'SANCTIONS_PROVIDER_API_KEY is set, but no real SanctionsProvider adapter is ' +

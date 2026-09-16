@@ -1,4 +1,5 @@
 import type { KybCheckResult, KybProvider, KybVerdict } from './providers.js';
+import type { SanctionsHit, SanctionsProvider, SanctionsScreeningResult } from './providers.js';
 
 /**
  * A real `KybProvider` adapter for Didit (didit.me), built against its own
@@ -139,4 +140,100 @@ export function createDiditKybProviderFromEnv(env: NodeJS.ProcessEnv = process.e
     );
   }
   return new DiditKybProvider(apiKey, searchUrl, selectUrl);
+}
+
+/**
+ * A real `SanctionsProvider` adapter for Didit, using the same account
+ * and API key as `DiditKybProvider` above -- Didit's AML screening
+ * (sanctions/PEP lists, optionally adverse media) is entity-type-aware
+ * (`person` | `company`), which is exactly the `SanctionsProvider.screen`
+ * shape (an organisation's legal name).
+ *
+ * Verified live through `didit_verify_aml` against the sandbox app: a
+ * screen for "Sandbox Holdings Ltd" (entity_type: company) and, to try
+ * to provoke a real hit, "Vladimir Putin" (entity_type: person) both
+ * returned `{ status: "Approved", total_hits: 0, hits: [], score: 0,
+ * warnings: [] }` — DiditAmlResponse below is typed against that
+ * confirmed shape. **What is NOT verified: the shape of a populated
+ * `hits` array.** The sandbox mock appears to always return zero hits
+ * regardless of input (same deterministic-mock behaviour observed for
+ * KYB registry search, which always returned one fixed "Sandbox
+ * Holdings Ltd" candidate) -- there was no `sandbox_scenario`-equivalent
+ * flag on this tool to force a hit the way session creation has
+ * `decline_aml_hit`. `mapDiditHit` below is written defensively against
+ * several plausible field-name conventions rather than one confirmed
+ * shape; confirm it against a real match (or Didit's dashboard) before
+ * depending on `SanctionsHit.listName`/`matchedName` for anything
+ * decision-critical.
+ */
+
+interface DiditAmlHit {
+  readonly [key: string]: unknown;
+}
+
+interface DiditAmlResponse {
+  readonly aml: {
+    readonly status: string;
+    readonly total_hits: number;
+    readonly hits: readonly DiditAmlHit[];
+    readonly score: number;
+  };
+}
+
+function mapDiditHit(hit: DiditAmlHit): SanctionsHit {
+  const listName = hit['list_name'] ?? hit['source'] ?? hit['list'] ?? hit['category'];
+  const matchedName = hit['matched_name'] ?? hit['name'] ?? hit['full_name'];
+  const score = hit['match_score'] ?? hit['score'] ?? hit['confidence'];
+  return {
+    listName: typeof listName === 'string' ? listName : 'unknown (unconfirmed Didit hit shape)',
+    matchedName: typeof matchedName === 'string' ? matchedName : 'unknown (unconfirmed Didit hit shape)',
+    score: typeof score === 'number' ? score : 0,
+  };
+}
+
+export class DiditSanctionsProvider implements SanctionsProvider {
+  readonly providerId = 'didit';
+
+  constructor(
+    private readonly apiKey: string,
+    private readonly screenUrl: string,
+  ) {}
+
+  async screen(input: { organisationId: string; legalName: string }): Promise<SanctionsScreeningResult> {
+    const response = await fetch(this.screenUrl, {
+      method: 'POST',
+      headers: { 'x-api-key': this.apiKey, 'content-type': 'application/json' },
+      // entity_type: "company" and full_name match the live-verified
+      // didit_verify_aml request shape.
+      body: JSON.stringify({ full_name: input.legalName, entity_type: 'company', include_adverse_media: true }),
+    });
+    if (!response.ok) {
+      throw new Error(`Didit AML screen returned ${response.status}`);
+    }
+    const body = (await response.json()) as DiditAmlResponse;
+
+    return {
+      providerId: this.providerId,
+      screened: true,
+      hits: body.aml.hits.map(mapDiditHit),
+      screenedAt: new Date().toISOString(),
+    };
+  }
+}
+
+export function createDiditSanctionsProviderFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): DiditSanctionsProvider | undefined {
+  const apiKey = env['DIDIT_API_KEY'];
+  if (!apiKey) return undefined;
+
+  const screenUrl = env['DIDIT_AML_SCREEN_URL'];
+  if (!screenUrl) {
+    throw new Error(
+      'DIDIT_API_KEY is set, but DIDIT_AML_SCREEN_URL is not. Get the exact AML screening ' +
+        "endpoint path from your Didit dashboard's API reference (this repository could not " +
+        'reach docs.didit.me to confirm it) and set it.',
+    );
+  }
+  return new DiditSanctionsProvider(apiKey, screenUrl);
 }

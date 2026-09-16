@@ -101,25 +101,35 @@ has been closed as of the hardening pass in this section's changelog.
 
 None of the remaining items are closable by more code alone:
 
-- **KYB is now real for one vendor (Didit); sanctions screening still needs
-  a signed contract.** `apps/api/src/compliance/didit.ts` is a working
-  `KybProvider` adapter for Didit (didit.me) — not a stub. It was built
-  against two live sandbox calls made through Didit's own MCP connector
-  (`didit_verify_kyb_search` / `didit_verify_kyb_select`, country GB,
-  company "Tesco"), and the response types it decodes match those real
-  JSON payloads exactly, not a guess. `createKybProvider()` picks it up
-  automatically once `DIDIT_API_KEY` is set (`.env.example`). What is
-  honestly still unconfirmed: the exact REST base URL/endpoint paths a
-  deployed server should call — `docs.didit.me`, `verification.didit.me`
-  and `apidocs.didit.me` were all unreachable from the sandbox that wrote
-  this (network egress blocked or DNS failure), and no official
-  server-side Didit Node SDK exists on npm to read them from (checked:
-  only client-side widget SDKs exist). `DIDIT_KYB_SEARCH_URL`/
-  `DIDIT_KYB_SELECT_URL` therefore have no default and must be confirmed
+- **Both KYB and sanctions screening are now real for one vendor
+  (Didit).** `apps/api/src/compliance/didit.ts` has two working adapters,
+  not stubs: `DiditKybProvider` (registry lookup) and
+  `DiditSanctionsProvider` (AML/PEP/sanctions screening, optionally
+  adverse media, entity-type-aware for a company). Both were built
+  against live calls made through Didit's own MCP connector against its
+  sandbox — `didit_verify_kyb_search`/`didit_verify_kyb_select` (country
+  GB, company "Tesco") for KYB, `didit_verify_aml` (company "Sandbox
+  Holdings Ltd", and "Vladimir Putin" as a person, to try to provoke a
+  real hit) for sanctions — and the response types they decode match
+  those real JSON payloads, not a guess. Both sandbox AML calls returned
+  zero hits (the sandbox mock appears deterministic, same as KYB registry
+  search always returning one fixed candidate), so the *shape of a
+  populated sanctions hit* is the one thing here still unconfirmed —
+  `mapDiditHit` is written defensively across several plausible
+  field-name spellings rather than one confirmed shape; confirm it
+  against a real match before depending on it for anything
+  decision-critical. `createKybProvider()`/`createSanctionsProvider()`
+  pick these up automatically once `DIDIT_API_KEY` is set
+  (`.env.example`). What is honestly still unconfirmed for both: the
+  exact REST base URL/endpoint paths a deployed server should call —
+  `docs.didit.me`, `verification.didit.me` and `apidocs.didit.me` were
+  all unreachable from the sandbox that wrote this (network egress
+  blocked or DNS failure), and no official server-side Didit Node SDK
+  exists on npm to read them from (checked: only client-side widget SDKs
+  exist). `DIDIT_KYB_SEARCH_URL`/`DIDIT_KYB_SELECT_URL`/
+  `DIDIT_AML_SCREEN_URL` therefore have no default and must be confirmed
   from the Didit dashboard's own API reference before this runs for real
-  — same reasoning as leaving `OIDC_ISSUER_URL` unset for WorkOS. Sanctions
-  screening has no adapter yet and still needs a signed vendor contract
-  (e.g. ComplyAdvantage, Refinitiv World-Check) and live API credentials.
+  — same reasoning as leaving `OIDC_ISSUER_URL` unset for WorkOS.
   The `KybProvider`/`SanctionsProvider` interface this section used to
   describe as a next step now exists
   (`apps/api/src/compliance/providers.ts`), mirroring `SettlementProvider`
@@ -132,7 +142,8 @@ None of the remaining items are closable by more code alone:
   the separate, explicit `setKybStatus` admin action, unchanged.
   `createKybProvider`/`createSanctionsProvider` deliberately throw at
   startup if a key is set with no adapter behind it (or, for Didit,
-  without both endpoint URLs), rather than silently no-op with a real key
+  without every endpoint URL it needs), rather than silently no-op with a
+  real key
   configured. The `screened: false` field on `SanctionsScreeningResult`
   exists specifically so an empty `hits: []` from the null provider can
   never be misread as "screened clean" by anything downstream.
