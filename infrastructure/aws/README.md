@@ -16,6 +16,9 @@ apps/api/Dockerfile                   Multi-stage build for the API (also
                                        doubles as the migration task image)
 infrastructure/aws/portal.Dockerfile  One Dockerfile, all five portals
                                        (--build-arg PORTAL=<name>)
+infrastructure/aws/terraform-bootstrap/  Run FIRST, local state: the S3
+                                       state bucket, DynamoDB lock table,
+                                       and the GitHub->AWS OIDC deploy role
 infrastructure/aws/terraform/         The AWS stack: VPC, RDS Postgres,
                                        ElastiCache Redis, S3 (evidence),
                                        ECR, ECS Fargate (API + 5 portals),
@@ -69,25 +72,33 @@ Nothing below works without this. Recommended: a dedicated AWS account
 (or at minimum a dedicated IAM role) for Neo-Lloyds, not a shared personal
 account — makes the SOC 2 access-review story much simpler later.
 
-### 2. A Terraform state backend
-`infrastructure/aws/terraform/versions.tf` has the S3+DynamoDB backend
-block commented out. Create that bucket and table first (`terraform init`
-with local state, once, is fine for the very first apply — don't leave it
-that way).
+### 2. Terraform state backend + GitHub OIDC deploy role
+Both are now real Terraform, not just described — `infrastructure/aws/terraform-bootstrap/`
+creates the S3 state bucket, the DynamoDB lock table, and the GitHub →
+AWS OIDC role `build-and-push.yml` needs, scoped narrowly to
+`ecr:*` on `neo-lloyds/*` only and to one repo/branch via the OIDC trust
+condition — no long-lived AWS access keys anywhere. **Not yet run**: the
+AWS connector available in this session needs you to re-authorize it
+(`/mcp` or your connector settings) before anything here can actually
+apply. Once it's live:
+```bash
+cd infrastructure/aws/terraform-bootstrap
+terraform init
+terraform apply -var="github_repo=KHAYAAI/NEO-LLOYDS"
+```
+Take the `github_deploy_role_arn` output and set it as the `AWS_ROLE_ARN`
+repo secret (also set `AWS_REGION`) — that closes out
+`.github/workflows/build-and-push.yml`. Then uncomment the `backend "s3"`
+block in `infrastructure/aws/terraform/versions.tf` (the bucket/table
+names already match what bootstrap creates) before the first real apply
+of the main stack.
 
 ### 3. Fill in `terraform.tfvars`
-Copy `terraform.tfvars.example`. Most values are placeholders until step 4
+Copy `terraform.tfvars.example`. Most values are placeholders until step 5
 runs once; `domain_name` and the WorkOS Production variables stay
 commented out until you have a real domain (see apps/admin-portal/README.md
 — the WorkOS Production environment already exists but was deliberately
 left unconfigured for the same reason).
-
-### 4. Wire GitHub Actions to AWS (for `build-and-push.yml`)
-Create an IAM role trusting GitHub's OIDC provider (`token.actions.githubusercontent.com`),
-scoped to `ecr:*` on the `neo-lloyds/*` repositories this stack creates,
-then set two repo secrets: `AWS_ROLE_ARN`, `AWS_REGION`. No long-lived AWS
-access keys — OIDC federation is the current AWS-recommended pattern and
-avoids a static credential existing anywhere at all.
 
 ### 5. First deploy, in order
 ```bash
@@ -112,11 +123,17 @@ also update the WorkOS Production environment's redirect/logout/CORS URIs
 already used for Staging) and set `NEXT_PUBLIC_WORKOS_REDIRECT_URI`
 per-portal accordingly.
 
-### 7. Real settlement, KYB/KYC, sanctions screening
-Unchanged from `docs/security-model.md` §8: these need signed vendor
-contracts and live API keys this repository cannot obtain on your behalf.
-The `SettlementProvider`/`KybProvider`/`SanctionsProvider` interfaces are
-built and ready for a real adapter class the moment you have one.
+### 7. Real settlement, KYB/KYC, sanctions screening — now partially done
+`SettlementProvider` (Stripe Connect Transfers), `KybProvider` and
+`SanctionsProvider` (both Didit) all have real adapters now, not just
+interfaces waiting for one — see `docs/security-model.md` §8 for exactly
+what each does and doesn't cover. What's still needed from you: a real
+Stripe account with `STRIPE_API_KEY` set, and — separately — a way to
+onboard each capital provider onto Stripe Connect so a real
+`destinationAccountId` exists to pay out to (nothing in Neo-Lloyds does
+that yet). `STABLECOIN` settlement and Didit's Bank Verification add-on
+(confirmed live to be disabled on the connected account) remain
+unbuilt/unavailable.
 
 ### 8. A real penetration test
 `security-scan.yml` (Shannon) is a genuine, real automated scanner — not

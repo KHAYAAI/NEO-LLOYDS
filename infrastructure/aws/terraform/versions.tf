@@ -7,9 +7,11 @@ terraform {
     }
   }
 
-  # Not configured: pick a real backend (S3 + DynamoDB lock table) before
-  # the first `terraform apply` against a real AWS account. Local state is
-  # fine for `terraform plan` review, not for anything you intend to keep.
+  # Not configured by default -- run infrastructure/aws/terraform-bootstrap/
+  # first (creates exactly the bucket/table named below, plus the GitHub
+  # OIDC deploy role), then uncomment this block for every apply after
+  # that. Local state is fine for `terraform plan` review, not for
+  # anything you intend to keep.
   #
   # backend "s3" {
   #   bucket         = "neo-lloyds-terraform-state"
