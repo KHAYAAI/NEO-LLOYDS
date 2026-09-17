@@ -27,9 +27,21 @@ export default async function DashboardPage() {
         ) : (
           open.map((listing) => (
             <div key={listing.id} className="nl-panel" style={{ background: 'transparent' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
                 <strong>{listing.title}</strong>
-                <span className="nl-badge nl-badge-open">{listing.status}</span>
+                <span style={{ display: 'flex', gap: 6 }}>
+                  <span
+                    className="nl-badge"
+                    title={
+                      listing.custodyModel === 'CUSTODIAL'
+                        ? 'An intermediary holds this listing\'s capital in transit.'
+                        : 'No intermediary holds this listing\'s capital.'
+                    }
+                  >
+                    {listing.custodyModel === 'CUSTODIAL' ? 'Custodial' : 'Non-custodial'}
+                  </span>
+                  <span className="nl-badge nl-badge-open">{listing.status}</span>
+                </span>
               </div>
               <p className="nl-muted" style={{ margin: '4px 0 12px' }}>
                 {listing.riskClass} · {listing.jurisdiction} · capacity {formatMoney(listing.capacity)} ·{' '}

@@ -18,6 +18,7 @@ export interface Listing {
   readonly capacity: Money;
   readonly status: 'OPEN' | 'MATCHED' | 'WITHDRAWN' | 'EXPIRED';
   readonly durationDays: number;
+  readonly custodyModel: 'CUSTODIAL' | 'NON_CUSTODIAL';
   readonly listedAt: string;
   readonly closedAt: string | null;
 }

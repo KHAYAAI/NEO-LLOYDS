@@ -8,6 +8,7 @@ function listing(overrides: Partial<Listing> = {}): Listing {
     jurisdiction: 'ZA',
     capacity: money(1_000_000_00, 'USD'),
     durationDays: 30,
+    custodyModel: 'CUSTODIAL',
     ...overrides,
   };
 }
@@ -22,6 +23,7 @@ function appetite(overrides: Partial<CapitalAppetite> = {}): CapitalAppetite {
     maxDurationDays: 60,
     riskTolerance: 'MODERATE',
     concentrationLimitBps: 5000, // 50%
+    acceptedCustodyModels: [],
     ...overrides,
   };
 }
@@ -73,6 +75,30 @@ describe('marketplace matching', () => {
     const result = matchesAppetite(
       listing({ riskClass: 'ANYTHING' }),
       appetite({ preferredRiskClasses: [] }),
+    );
+    expect(result.matches).toBe(true);
+  });
+
+  it('an empty accepted-custody-models list means "no preference", accepts either', () => {
+    const custodial = matchesAppetite(listing({ custodyModel: 'CUSTODIAL' }), appetite());
+    const nonCustodial = matchesAppetite(listing({ custodyModel: 'NON_CUSTODIAL' }), appetite());
+    expect(custodial.matches).toBe(true);
+    expect(nonCustodial.matches).toBe(true);
+  });
+
+  it('rejects a custody model the provider has not declared it will accept', () => {
+    const result = matchesAppetite(
+      listing({ custodyModel: 'NON_CUSTODIAL' }),
+      appetite({ acceptedCustodyModels: ['CUSTODIAL'] }),
+    );
+    expect(result.matches).toBe(false);
+    expect(result.reasons.some((r) => r.includes('Custody model'))).toBe(true);
+  });
+
+  it('matches when the listing custody model is in the provider\'s accepted set', () => {
+    const result = matchesAppetite(
+      listing({ custodyModel: 'NON_CUSTODIAL' }),
+      appetite({ acceptedCustodyModels: ['CUSTODIAL', 'NON_CUSTODIAL'] }),
     );
     expect(result.matches).toBe(true);
   });

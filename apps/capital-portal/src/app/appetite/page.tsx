@@ -5,7 +5,14 @@ import { PortalShell } from '@/components/portal-shell';
 import { AppetiteForm } from './appetite-form';
 
 interface RankedMatch {
-  listing: { id: string; riskClass: string; jurisdiction: string; capacity: { amountMinor: number; currency: string }; durationDays: number };
+  listing: {
+    id: string;
+    riskClass: string;
+    jurisdiction: string;
+    capacity: { amountMinor: number; currency: string };
+    durationDays: number;
+    custodyModel: 'CUSTODIAL' | 'NON_CUSTODIAL';
+  };
   result: { matches: boolean; reasons: readonly string[] };
 }
 
@@ -37,7 +44,8 @@ export default async function AppetitePage() {
             Currently set: {appetite.preferredRiskClasses.join(', ')} in{' '}
             {appetite.preferredJurisdictions.join(', ')}, up to{' '}
             {(appetite.maxExposure.amountMinor / 100).toLocaleString()} {appetite.maxExposure.currency},{' '}
-            {appetite.riskTolerance.toLowerCase()} tolerance.
+            {appetite.riskTolerance.toLowerCase()} tolerance. Accepted custody:{' '}
+            {appetite.acceptedCustodyModels.length > 0 ? appetite.acceptedCustodyModels.join(', ') : 'either (no preference)'}.
           </p>
         ) : (
           <p className="nl-muted">No appetite profile set yet.</p>
@@ -57,6 +65,7 @@ export default async function AppetitePage() {
                   <th>Risk class</th>
                   <th>Jurisdiction</th>
                   <th>Capacity</th>
+                  <th>Custody</th>
                   <th>Match</th>
                   <th>Reasons</th>
                 </tr>
@@ -69,6 +78,7 @@ export default async function AppetitePage() {
                     <td>
                       {(m.listing.capacity.amountMinor / 100).toLocaleString()} {m.listing.capacity.currency}
                     </td>
+                    <td>{m.listing.custodyModel === 'CUSTODIAL' ? 'Custodial' : 'Non-custodial'}</td>
                     <td>{m.result.matches ? '✓' : '✗'}</td>
                     <td className="nl-muted">{m.result.reasons.join('; ') || '—'}</td>
                   </tr>

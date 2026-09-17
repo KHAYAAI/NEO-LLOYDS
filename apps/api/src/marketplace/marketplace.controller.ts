@@ -16,12 +16,15 @@ import type { AuthContext } from '@neo-lloyds/domain';
 import { MarketplaceService } from './marketplace.service.js';
 import { RequireRoles, RequireScopes, type RequestWithAuth } from '../common/auth.js';
 
+const CUSTODY_MODELS = ['CUSTODIAL', 'NON_CUSTODIAL'] as const;
+
 class ListSubmissionDto {
   @IsString() submissionId: string;
   @IsString() @MaxLength(100) riskClass: string;
   @IsInt() @IsPositive() capacityMinor: number;
   @IsString() @Length(3, 3) currency: string;
   @IsInt() @Min(1) durationDays: number;
+  @IsIn(CUSTODY_MODELS) custodyModel: 'CUSTODIAL' | 'NON_CUSTODIAL';
 }
 
 class AppetiteDto {
@@ -33,6 +36,8 @@ class AppetiteDto {
   @IsInt() @Min(1) maxDurationDays: number;
   @IsIn(['CONSERVATIVE', 'MODERATE', 'AGGRESSIVE']) riskTolerance: 'CONSERVATIVE' | 'MODERATE' | 'AGGRESSIVE';
   @IsInt() @Min(0) @Max(10_000) concentrationLimitBps: number;
+  /** Empty/omitted means no preference — matches either custody model. */
+  @IsOptional() @IsArray() @IsIn(CUSTODY_MODELS, { each: true }) acceptedCustodyModels?: ('CUSTODIAL' | 'NON_CUSTODIAL')[];
 }
 
 class ExpressInterestDto {
@@ -56,7 +61,7 @@ export class MarketplaceController {
   @RequireRoles('RISK_ORIGINATOR', 'BROKER')
   @ApiOperation({
     summary:
-      'List a READY_FOR_UNDERWRITING submission. Requires current underwriting clearance — re-checked at listing time, not cached.',
+      'List a READY_FOR_UNDERWRITING submission. Requires current underwriting clearance — re-checked at listing time, not cached. custodyModel must be declared explicitly (CUSTODIAL or NON_CUSTODIAL) — every listing discloses how the capital behind it is held, never left implicit.',
   })
   async createListing(@Req() req: RequestWithAuth, @Body() body: ListSubmissionDto) {
     const listing = await this.marketplace.listSubmission(auth(req), {
@@ -64,6 +69,7 @@ export class MarketplaceController {
       riskClass: body.riskClass,
       capacity: { amountMinor: body.capacityMinor, currency: body.currency },
       durationDays: body.durationDays,
+      custodyModel: body.custodyModel,
     });
     return { listing };
   }
@@ -110,6 +116,7 @@ export class MarketplaceController {
       maxDurationDays: body.maxDurationDays,
       riskTolerance: body.riskTolerance,
       concentrationLimitBps: body.concentrationLimitBps,
+      acceptedCustodyModels: body.acceptedCustodyModels ?? [],
     });
     return { appetite };
   }

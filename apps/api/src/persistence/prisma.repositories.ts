@@ -663,6 +663,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     capacityMinor: bigint;
     currency: string;
     durationDays: number;
+    custodyModel: string;
     status: string;
     listedAt: Date;
     closedAt: Date | null;
@@ -678,6 +679,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       capacity: money(Number(row.capacityMinor), row.currency),
       status: row.status as StoredListing['status'],
       durationDays: row.durationDays,
+      custodyModel: row.custodyModel as StoredListing['custodyModel'],
       listedAt: row.listedAt,
       closedAt: row.closedAt,
     };
@@ -698,6 +700,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         capacityMinor: BigInt(listing.capacity.amountMinor),
         currency: listing.capacity.currency,
         durationDays: listing.durationDays,
+        custodyModel: listing.custodyModel,
       },
     });
     return this.listingToDomain(row);
@@ -744,6 +747,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         maxDurationDays: profile.maxDurationDays,
         riskTolerance: profile.riskTolerance,
         concentrationLimitBps: profile.concentrationLimitBps,
+        acceptedCustodyModels: [...profile.acceptedCustodyModels],
       },
       update: {
         preferredRiskClasses: [...profile.preferredRiskClasses],
@@ -754,6 +758,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         maxDurationDays: profile.maxDurationDays,
         riskTolerance: profile.riskTolerance,
         concentrationLimitBps: profile.concentrationLimitBps,
+        acceptedCustodyModels: [...profile.acceptedCustodyModels],
       },
     });
     return profile;
@@ -771,6 +776,7 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       maxDurationDays: row.maxDurationDays,
       riskTolerance: row.riskTolerance as CapitalAppetite['riskTolerance'],
       concentrationLimitBps: row.concentrationLimitBps,
+      acceptedCustodyModels: row.acceptedCustodyModels as CapitalAppetite['acceptedCustodyModels'],
     };
   }
 

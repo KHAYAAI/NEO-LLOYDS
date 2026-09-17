@@ -28,6 +28,7 @@ export async function setAppetite(_prevState: ActionState, formData: FormData): 
         maxDurationDays: Number(formData.get('maxDurationDays')),
         riskTolerance: String(formData.get('riskTolerance')),
         concentrationLimitBps: Number(formData.get('concentrationLimitBps')),
+        acceptedCustodyModels: formData.getAll('acceptedCustodyModels').map(String),
       },
     });
     revalidatePath('/appetite');

@@ -9,6 +9,7 @@ import {
   requireTenantAccess,
   type AuthContext,
   type CapitalAppetite,
+  type CustodyModel,
   type Money as MoneyType,
 } from '@neo-lloyds/domain';
 import {
@@ -54,7 +55,13 @@ export class MarketplaceService {
    */
   async listSubmission(
     ctx: AuthContext,
-    input: { submissionId: string; riskClass: string; capacity: MoneyType; durationDays: number },
+    input: {
+      submissionId: string;
+      riskClass: string;
+      capacity: MoneyType;
+      durationDays: number;
+      custodyModel: CustodyModel;
+    },
   ): Promise<StoredListing> {
     requireAnyRole(ctx, ['RISK_ORIGINATOR', 'BROKER']);
 
@@ -93,6 +100,7 @@ export class MarketplaceService {
       jurisdiction: riskNode?.jurisdiction ?? 'ZA',
       capacity: input.capacity,
       durationDays: input.durationDays,
+      custodyModel: input.custodyModel,
     });
 
     await this.audit.record({
@@ -181,6 +189,7 @@ export class MarketplaceService {
         jurisdiction: l.jurisdiction,
         capacity: l.capacity,
         durationDays: l.durationDays,
+        custodyModel: l.custodyModel,
       })),
       appetite,
     );
@@ -214,6 +223,7 @@ export class MarketplaceService {
           jurisdiction: listing.jurisdiction,
           capacity: listing.capacity,
           durationDays: listing.durationDays,
+          custodyModel: listing.custodyModel,
         },
         appetite,
       );

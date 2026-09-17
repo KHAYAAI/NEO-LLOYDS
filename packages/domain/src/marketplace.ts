@@ -12,12 +12,26 @@ import { compareMoney } from './money.js';
 
 export type RiskTolerance = 'CONSERVATIVE' | 'MODERATE' | 'AGGRESSIVE';
 
+/**
+ * How the capital behind a listing is actually held once syndicated:
+ * `CUSTODIAL` means an intermediary (Neo-Lloyds' settlement processor —
+ * Stripe Connect Transfers today) holds funds in transit; `NON_CUSTODIAL`
+ * means no intermediary custody exists, whether that's programmatic
+ * escrow (e.g. a smart-contract vault) or direct counterparty transfer.
+ * Disclosed on every listing rather than left implicit, the same
+ * transparency instinct `matchesAppetite`'s explicit rejection reasons
+ * follow — a capital provider decides for itself whether that model is
+ * acceptable, it is never assumed on their behalf.
+ */
+export type CustodyModel = 'CUSTODIAL' | 'NON_CUSTODIAL';
+
 export interface Listing {
   readonly id: string;
   readonly riskClass: string;
   readonly jurisdiction: string;
   readonly capacity: Money;
   readonly durationDays: number;
+  readonly custodyModel: CustodyModel;
 }
 
 /** A capital provider's standing appetite (brief §8). */
@@ -32,6 +46,8 @@ export interface CapitalAppetite {
   readonly riskTolerance: RiskTolerance;
   /** Max share of the provider's total capacity any single listing may consume, in basis points. */
   readonly concentrationLimitBps: number;
+  /** Empty means no preference — matches a listing under either custody model, same convention as preferredRiskClasses/preferredJurisdictions. */
+  readonly acceptedCustodyModels: readonly CustodyModel[];
 }
 
 export interface MatchResult {
@@ -72,6 +88,15 @@ export function matchesAppetite(listing: Listing, appetite: CapitalAppetite): Ma
   ) {
     reasons.push(
       `Jurisdiction ${listing.jurisdiction} is not in the provider's preferred jurisdictions.`,
+    );
+  }
+
+  if (
+    appetite.acceptedCustodyModels.length > 0 &&
+    !appetite.acceptedCustodyModels.includes(listing.custodyModel)
+  ) {
+    reasons.push(
+      `Custody model ${listing.custodyModel} is not one the provider accepts (${appetite.acceptedCustodyModels.join(', ')}).`,
     );
   }
 

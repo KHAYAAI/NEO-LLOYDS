@@ -389,6 +389,11 @@ model MarketListing {
   capacityMinor  BigInt
   currency       String        @db.Char(3)
   durationDays   Int
+  /// Whether the capital behind this listing is held by an intermediary
+  /// in transit (CUSTODIAL — Stripe Connect Transfers today) or moves with
+  /// no intermediary custody (NON_CUSTODIAL). Disclosed per listing, never
+  /// assumed — see CustodyModel in @neo-lloyds/domain.
+  custodyModel   CustodyModel  @default(CUSTODIAL)
   status         ListingStatus @default(OPEN)
   listedAt       DateTime      @default(now())
   closedAt       DateTime?
@@ -398,6 +403,11 @@ model MarketListing {
 
   @@index([organisationId, status])
   @@index([riskClass, jurisdiction, status])
+}
+
+enum CustodyModel {
+  CUSTODIAL
+  NON_CUSTODIAL
 }
 
 /// A capital provider's standing appetite (brief §8: preferred risk classes,
@@ -415,6 +425,9 @@ model CapitalAppetiteProfile {
   maxDurationDays        Int
   riskTolerance         String
   concentrationLimitBps  Int
+  /// Empty means no preference -- matches either custody model, same
+  /// convention as preferredRiskClasses/preferredJurisdictions above.
+  acceptedCustodyModels CustodyModel[] @default([])
   updatedAt             DateTime @updatedAt
 
   @@index([organisationId])

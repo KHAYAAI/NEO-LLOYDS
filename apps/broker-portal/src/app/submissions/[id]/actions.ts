@@ -75,6 +75,7 @@ export async function listToMarketplace(
         capacityMinor: Number(formData.get('capacityMinor')),
         currency: String(formData.get('currency') ?? 'USD').toUpperCase(),
         durationDays: Number(formData.get('durationDays')),
+        custodyModel: String(formData.get('custodyModel') ?? 'CUSTODIAL'),
       },
     });
     revalidatePath(`/submissions/${submissionId}`);

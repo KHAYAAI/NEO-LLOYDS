@@ -1043,13 +1043,13 @@ describe('Phase 4: marketplace', () => {
     const { submission } = await readySubmission('marketplace-listing-risk');
     const listed = await authed()
       .post('/marketplace/listings')
-      .send({ submissionId: submission.id, riskClass: 'MARINE_CARGO', capacityMinor: 5000, currency: 'USD', durationDays: 30 })
+      .send({ submissionId: submission.id, riskClass: 'MARINE_CARGO', capacityMinor: 5000, currency: 'USD', durationDays: 30, custodyModel: 'CUSTODIAL' })
       .expect(201);
     expect(listed.body.listing.status).toBe('OPEN');
 
     const dup = await authed()
       .post('/marketplace/listings')
-      .send({ submissionId: submission.id, riskClass: 'MARINE_CARGO', capacityMinor: 5000, currency: 'USD', durationDays: 30 });
+      .send({ submissionId: submission.id, riskClass: 'MARINE_CARGO', capacityMinor: 5000, currency: 'USD', durationDays: 30, custodyModel: 'CUSTODIAL' });
     expect(dup.status).toBe(422);
     expect(dup.body.error.code).toBe('ALREADY_LISTED');
   });
@@ -1066,7 +1066,7 @@ describe('Phase 4: marketplace', () => {
 
     const response = await authed()
       .post('/marketplace/listings')
-      .send({ submissionId: submission.id, riskClass: 'MARINE_CARGO', capacityMinor: 5000, currency: 'USD', durationDays: 30 });
+      .send({ submissionId: submission.id, riskClass: 'MARINE_CARGO', capacityMinor: 5000, currency: 'USD', durationDays: 30, custodyModel: 'CUSTODIAL' });
     expect(response.status).toBe(422);
     expect(response.body.error.code).toBe('NOT_ASSESSED');
   });
@@ -1075,7 +1075,7 @@ describe('Phase 4: marketplace', () => {
     const { submission } = await readySubmission('appetite-match-risk');
     const listed = await authed()
       .post('/marketplace/listings')
-      .send({ submissionId: submission.id, riskClass: 'MARINE_CARGO', capacityMinor: 5000, currency: 'USD', durationDays: 30 })
+      .send({ submissionId: submission.id, riskClass: 'MARINE_CARGO', capacityMinor: 5000, currency: 'USD', durationDays: 30, custodyModel: 'CUSTODIAL' })
       .expect(201);
     const listingId = listed.body.listing.id as string;
 
@@ -1115,6 +1115,95 @@ describe('Phase 4: marketplace', () => {
     await providerAuth().delete(`/marketplace/listings/${listingId}/interest`).expect(200);
   });
 
+  it('discloses a listing\'s custody model, and lets a provider restrict matches to the ones it accepts', async () => {
+    const { submission: custodialSubmission } = await readySubmission('custody-disclosure-custodial-risk');
+    const custodial = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: custodialSubmission.id, riskClass: 'CUSTODY_TEST', capacityMinor: 5000, currency: 'USD', durationDays: 30, custodyModel: 'CUSTODIAL' })
+      .expect(201);
+    expect(custodial.body.listing.custodyModel).toBe('CUSTODIAL');
+
+    const { submission: nonCustodialSubmission } = await readySubmission('custody-disclosure-non-custodial-risk');
+    const nonCustodial = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: nonCustodialSubmission.id, riskClass: 'CUSTODY_TEST', capacityMinor: 5000, currency: 'USD', durationDays: 30, custodyModel: 'NON_CUSTODIAL' })
+      .expect(201);
+    expect(nonCustodial.body.listing.custodyModel).toBe('NON_CUSTODIAL');
+
+    const provider = await bootstrapOrganisation('Custodial-Only Capital Provider', ['*'], ['CAPITAL_PROVIDER']);
+    const providerAuth = () => ({
+      get: (url: string) => request(http).get(url).set('Authorization', `Bearer ${provider.token}`),
+      post: (url: string) => request(http).post(url).set('Authorization', `Bearer ${provider.token}`),
+    });
+
+    await providerAuth()
+      .post('/marketplace/appetite')
+      .send({
+        preferredRiskClasses: ['CUSTODY_TEST'],
+        maxExposureMinor: 1_000_000,
+        currency: 'USD',
+        preferredJurisdictions: [],
+        minimumReturnBps: 0,
+        maxDurationDays: 60,
+        riskTolerance: 'MODERATE',
+        concentrationLimitBps: 10_000,
+        acceptedCustodyModels: ['CUSTODIAL'],
+      })
+      .expect(201);
+
+    const matches = await providerAuth().get('/marketplace/appetite/matches').expect(200);
+    type MatchRow = { listing: { id: string }; result: { matches: boolean; reasons: string[] } };
+    const custodialMatch = matches.body.matches.find((m: MatchRow) => m.listing.id === custodial.body.listing.id);
+    const nonCustodialMatch = matches.body.matches.find((m: MatchRow) => m.listing.id === nonCustodial.body.listing.id);
+
+    expect(custodialMatch.result.matches).toBe(true);
+    expect(nonCustodialMatch.result.matches).toBe(false);
+    expect(nonCustodialMatch.result.reasons.some((r: string) => r.includes('Custody model'))).toBe(true);
+  });
+
+  it('an appetite with no declared custody preference matches listings under either model', async () => {
+    const { submission: custodialSubmission } = await readySubmission('custody-no-pref-custodial-risk');
+    const custodial = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: custodialSubmission.id, riskClass: 'CUSTODY_NO_PREF', capacityMinor: 5000, currency: 'USD', durationDays: 30, custodyModel: 'CUSTODIAL' })
+      .expect(201);
+
+    const { submission: nonCustodialSubmission } = await readySubmission('custody-no-pref-non-custodial-risk');
+    const nonCustodial = await authed()
+      .post('/marketplace/listings')
+      .send({ submissionId: nonCustodialSubmission.id, riskClass: 'CUSTODY_NO_PREF', capacityMinor: 5000, currency: 'USD', durationDays: 30, custodyModel: 'NON_CUSTODIAL' })
+      .expect(201);
+
+    const provider = await bootstrapOrganisation('No-Preference Capital Provider', ['*'], ['CAPITAL_PROVIDER']);
+    const providerAuth = () => ({
+      get: (url: string) => request(http).get(url).set('Authorization', `Bearer ${provider.token}`),
+      post: (url: string) => request(http).post(url).set('Authorization', `Bearer ${provider.token}`),
+    });
+
+    await providerAuth()
+      .post('/marketplace/appetite')
+      .send({
+        preferredRiskClasses: ['CUSTODY_NO_PREF'],
+        maxExposureMinor: 1_000_000,
+        currency: 'USD',
+        preferredJurisdictions: [],
+        minimumReturnBps: 0,
+        maxDurationDays: 60,
+        riskTolerance: 'MODERATE',
+        concentrationLimitBps: 10_000,
+        // acceptedCustodyModels omitted entirely
+      })
+      .expect(201);
+
+    const matches = await providerAuth().get('/marketplace/appetite/matches').expect(200);
+    type MatchRow = { listing: { id: string }; result: { matches: boolean } };
+    const custodialMatch = matches.body.matches.find((m: MatchRow) => m.listing.id === custodial.body.listing.id);
+    const nonCustodialMatch = matches.body.matches.find((m: MatchRow) => m.listing.id === nonCustodial.body.listing.id);
+
+    expect(custodialMatch.result.matches).toBe(true);
+    expect(nonCustodialMatch.result.matches).toBe(true);
+  });
+
   it('a non-capital-provider cannot set appetite or express interest', async () => {
     const broker = await bootstrapOrganisation('Marketplace Broker Only', ['*'], ['BROKER']);
     const response = await request(http)
@@ -1137,7 +1226,7 @@ describe('Phase 4: marketplace', () => {
     const { submission } = await readySubmission('withdrawn-listing-risk');
     const listed = await authed()
       .post('/marketplace/listings')
-      .send({ submissionId: submission.id, riskClass: 'UNIQUE_CLASS_XYZ', capacityMinor: 5000, currency: 'USD', durationDays: 30 })
+      .send({ submissionId: submission.id, riskClass: 'UNIQUE_CLASS_XYZ', capacityMinor: 5000, currency: 'USD', durationDays: 30, custodyModel: 'CUSTODIAL' })
       .expect(201);
 
     await authed().post(`/marketplace/listings/${listed.body.listing.id}/withdraw`).expect(201);
@@ -1172,7 +1261,7 @@ describe('Phase 5: syndication', () => {
 
     const listing = await authed()
       .post('/marketplace/listings')
-      .send({ submissionId: submission.id, riskClass: 'SYNDICATION_TEST', capacityMinor, currency: 'USD', durationDays: 30 })
+      .send({ submissionId: submission.id, riskClass: 'SYNDICATION_TEST', capacityMinor, currency: 'USD', durationDays: 30, custodyModel: 'CUSTODIAL' })
       .then((r) => r.body.listing);
 
     return listing.id as string;
@@ -1384,7 +1473,7 @@ describe('Phase 6: capital ledger — cross-syndication exposure', () => {
 
     const listing = await authed()
       .post('/marketplace/listings')
-      .send({ submissionId: submission.id, riskClass: 'LEDGER_TEST', capacityMinor, currency: 'USD', durationDays: 30 })
+      .send({ submissionId: submission.id, riskClass: 'LEDGER_TEST', capacityMinor, currency: 'USD', durationDays: 30, custodyModel: 'CUSTODIAL' })
       .then((r) => r.body.listing);
 
     const syndication = await authed()
@@ -1585,7 +1674,7 @@ describe('Phase 7: claims — testing a bound allocation against a loss', () => 
 
     const listing = await authed()
       .post('/marketplace/listings')
-      .send({ submissionId: submission.id, riskClass: 'CLAIMS_TEST', capacityMinor, currency: 'USD', durationDays: 30 })
+      .send({ submissionId: submission.id, riskClass: 'CLAIMS_TEST', capacityMinor, currency: 'USD', durationDays: 30, custodyModel: 'CUSTODIAL' })
       .then((r) => r.body.listing);
 
     const syndication = await authed()
@@ -1627,7 +1716,7 @@ describe('Phase 7: claims — testing a bound allocation against a loss', () => 
     }
     const listing = await authed()
       .post('/marketplace/listings')
-      .send({ submissionId: submission.id, riskClass: 'UNBOUND_TEST', capacityMinor: 10_000, currency: 'USD', durationDays: 30 })
+      .send({ submissionId: submission.id, riskClass: 'UNBOUND_TEST', capacityMinor: 10_000, currency: 'USD', durationDays: 30, custodyModel: 'CUSTODIAL' })
       .then((r) => r.body.listing);
     const syndication = await authed().post('/syndication').send({ listingId: listing.id }).then((r) => r.body.syndication);
 
@@ -2143,6 +2232,7 @@ describe('Phase 11: AI Agent API', () => {
         capacityMinor: 1_000_000_00,
         currency: 'USD',
         durationDays: 30,
+        custodyModel: 'CUSTODIAL',
       })
       .expect(201);
     const listing = listingResp.body.listing;

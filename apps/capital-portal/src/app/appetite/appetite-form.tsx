@@ -50,6 +50,17 @@ export function AppetiteForm() {
           <option value="AGGRESSIVE">AGGRESSIVE</option>
         </select>
       </div>
+      <fieldset className="nl-field" style={{ border: 'none', padding: 0, margin: 0 }}>
+        <legend>Accepted custody models (leave both unchecked for no preference)</legend>
+        <label style={{ display: 'block', fontWeight: 'normal' }}>
+          <input type="checkbox" name="acceptedCustodyModels" value="CUSTODIAL" /> Custodial — an
+          intermediary holds capital in transit
+        </label>
+        <label style={{ display: 'block', fontWeight: 'normal' }}>
+          <input type="checkbox" name="acceptedCustodyModels" value="NON_CUSTODIAL" /> Non-custodial
+          — no intermediary holds capital
+        </label>
+      </fieldset>
       <button className="nl-button" type="submit" disabled={pending}>
         {pending ? 'Saving…' : 'Save appetite'}
       </button>

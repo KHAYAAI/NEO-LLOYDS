@@ -3,6 +3,7 @@ import type {
   Allocation,
   AuditRecord,
   CapitalAppetite,
+  CustodyModel,
   MarketRole,
   Money,
   Organisation,
@@ -136,6 +137,7 @@ export interface StoredListing {
   capacity: Money;
   status: 'OPEN' | 'MATCHED' | 'WITHDRAWN' | 'EXPIRED';
   durationDays: number;
+  custodyModel: CustodyModel;
   listedAt: Date;
   closedAt: Date | null;
 }

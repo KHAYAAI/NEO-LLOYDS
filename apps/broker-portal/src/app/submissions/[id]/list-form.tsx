@@ -12,7 +12,7 @@ export function ListForm({ submissionId, riskId }: { submissionId: string; riskI
 
   return (
     <form action={formAction}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 12 }}>
         <div className="nl-field">
           <label htmlFor="riskClass">Risk class</label>
           <input id="riskClass" name="riskClass" type="text" placeholder="MARINE_CARGO" required />
@@ -28,6 +28,16 @@ export function ListForm({ submissionId, riskId }: { submissionId: string; riskI
         <div className="nl-field">
           <label htmlFor="durationDays">Duration (days)</label>
           <input id="durationDays" name="durationDays" type="number" min={1} defaultValue={30} required />
+        </div>
+        <div className="nl-field">
+          <label htmlFor="custodyModel">Custody model</label>
+          <select id="custodyModel" name="custodyModel" required defaultValue="">
+            <option value="" disabled>
+              Choose one…
+            </option>
+            <option value="CUSTODIAL">Custodial — an intermediary holds capital in transit</option>
+            <option value="NON_CUSTODIAL">Non-custodial — no intermediary holds capital</option>
+          </select>
         </div>
       </div>
       <button className="nl-button" type="submit" disabled={pending}>
