@@ -343,6 +343,38 @@ export class IdentityService {
     return mandate;
   }
 
+  /**
+   * The kill switch: invalidates a mandate before its own `expiresAt`. Only
+   * the principal that issued it may revoke it. Effective immediately —
+   * `assertAgentMayAct`'s ctx.mandate is resolved fresh on every request via
+   * `findActiveMandate` (common/auth.ts), which excludes revoked mandates,
+   * so there is no caching layer to invalidate separately.
+   */
+  async revokeMandate(ctx: AuthContext, mandateId: string): Promise<void> {
+    const mandate = await this.repository.findMandateById(mandateId);
+    if (!mandate) throw new NotFoundException('Mandate not found');
+
+    if (ctx.organisationId !== mandate.principalOrganisationId) {
+      throw new DomainError(
+        "Only the principal organisation may revoke its agent's mandate",
+        'FORBIDDEN',
+        { principalOrganisationId: mandate.principalOrganisationId },
+      );
+    }
+
+    await this.repository.revokeMandate(mandateId);
+
+    await this.audit.record({
+      ctx,
+      action: 'identity.mandate.revoke',
+      subjectType: 'AgentMandate',
+      subjectId: mandateId,
+      decision: 'ALLOWED',
+      reason: 'Agent mandate revoked by principal',
+      policy: 'AGENT_MANDATE',
+    });
+  }
+
   async getOrganisation(id: string): Promise<Organisation> {
     const organisation = await this.repository.findOrganisation(id);
     if (!organisation) throw new NotFoundException('Organisation not found');

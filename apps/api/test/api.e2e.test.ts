@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { createHmac } from 'node:crypto';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -97,7 +98,7 @@ beforeAll(async () => {
 
   process.env.CORS_ALLOWED_ORIGINS = 'https://allowed.test';
 
-  app = moduleRef.createNestApplication<NestExpressApplication>();
+  app = moduleRef.createNestApplication<NestExpressApplication>({ rawBody: true });
   hardenApp(app);
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
@@ -670,6 +671,78 @@ describe('identity and governance', () => {
       .post('/compliance/verification-sessions')
       .send({ workflowId: 'w', vendorData: 'v' });
     expect(response.status).toBe(500);
+  });
+
+  describe('POST /compliance/webhooks/didit', () => {
+    const webhookSecret = 'e2e-test-didit-webhook-secret';
+    // A function, not a constant: rootOrgId is only assigned inside
+    // beforeAll, which runs after this describe block's body (and any
+    // constants defined directly in it) has already been evaluated.
+    function makeBody(): string {
+      return JSON.stringify({
+        application_id: 'app-1',
+        created_at: 1789628455,
+        environment: 'sandbox',
+        event_id: 'event-1',
+        session_id: 'session-1',
+        status: 'Approved',
+        timestamp: 1789628455,
+        vendor_data: rootOrgId,
+        webhook_type: 'status.updated',
+        workflow_id: 'workflow-1',
+        workflow_version: 1,
+      });
+    }
+
+    function sign(payload: string, secret: string): string {
+      return createHmac('sha256', secret).update(Buffer.from(payload, 'utf8')).digest('hex');
+    }
+
+    it('rejects a webhook with no DIDIT_WEBHOOK_SECRET configured', async () => {
+      delete process.env.DIDIT_WEBHOOK_SECRET;
+      await request(http)
+        .post('/compliance/webhooks/didit')
+        .set('content-type', 'application/json')
+        .send(makeBody())
+        .expect(500);
+    });
+
+    it('rejects a webhook with an invalid signature', async () => {
+      process.env.DIDIT_WEBHOOK_SECRET = webhookSecret;
+      await request(http)
+        .post('/compliance/webhooks/didit')
+        .set('content-type', 'application/json')
+        .set('x-signature', 'a'.repeat(64))
+        .send(makeBody())
+        .expect(401);
+      delete process.env.DIDIT_WEBHOOK_SECRET;
+    });
+
+    it('accepts a correctly signed webhook with no bearer credential, and records it to the audit log without touching kybStatus', async () => {
+      process.env.DIDIT_WEBHOOK_SECRET = webhookSecret;
+      const before = audit.records.length;
+      const kybBefore = await authed().get(`/identity/organisations/${rootOrgId}`).expect(200);
+      const body = makeBody();
+
+      await request(http)
+        .post('/compliance/webhooks/didit')
+        .set('content-type', 'application/json')
+        .set('x-signature', sign(body, webhookSecret))
+        .send(body)
+        .expect(200)
+        .then((r) => expect(r.body.received).toBe(true));
+
+      expect(audit.records.length).toBe(before + 1);
+      const record = audit.records.at(-1);
+      expect(record?.action).toBe('compliance.verification-session.webhook');
+      expect(record?.subjectId).toBe('session-1');
+      expect(record?.actorOrganisationId).toBe(rootOrgId);
+      expect(record?.reason).toContain('Approved');
+
+      const kybAfter = await authed().get(`/identity/organisations/${rootOrgId}`).expect(200);
+      expect(kybAfter.body.organisation.kybStatus).toBe(kybBefore.body.organisation.kybStatus);
+      delete process.env.DIDIT_WEBHOOK_SECRET;
+    });
   });
 
   it('writes an audit record for every material action', async () => {
@@ -1871,7 +1944,7 @@ describe('Phase 11: AI Agent API', () => {
     permittedActions: string[],
     maxTransactionValueMinor: number,
     currency = 'USD',
-  ): Promise<{ token: string; agentOrgId: string }> {
+  ): Promise<{ token: string; agentOrgId: string; mandateId: string }> {
     const suffix = Math.random().toString(36).slice(2, 8);
     const agentOrg = await identity.createOrganisation({
       id: `org-agent-${suffix}`,
@@ -1897,8 +1970,9 @@ describe('Phase 11: AI Agent API', () => {
       expiresAt: null,
     });
 
+    const mandateId = `mandate-${agentOrg.id}`;
     await identity.createMandate({
-      id: `mandate-${agentOrg.id}`,
+      id: mandateId,
       agentOrganisationId: agentOrg.id,
       principalOrganisationId: rootOrgId,
       permittedActions,
@@ -1907,7 +1981,7 @@ describe('Phase 11: AI Agent API', () => {
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     });
 
-    return { token: `${keyId}.${secret}`, agentOrgId: agentOrg.id };
+    return { token: `${keyId}.${secret}`, agentOrgId: agentOrg.id, mandateId };
   }
 
   it('lets a mandated agent submit activity', async () => {
@@ -1930,6 +2004,56 @@ describe('Phase 11: AI Agent API', () => {
       .post('/agent/activity')
       .set('Authorization', `Bearer ${token}`)
       .send({ riskId: risk, title: 'Should be forbidden' })
+      .expect(403);
+  });
+
+  it('revokes a mandate: the agent can act before revocation and is refused after', async () => {
+    const { token, mandateId } = await bootstrapAgent(['activity.submit'], 1_000_00);
+    const risk = await createNode('RISK', 'agent-kill-switch-risk', token);
+
+    await request(http)
+      .post('/agent/activity')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ riskId: risk, title: 'Before revocation' })
+      .expect(201);
+
+    await request(http)
+      .post(`/identity/mandates/${mandateId}/revoke`)
+      .set('Authorization', `Bearer ${rootToken}`)
+      .expect(201)
+      .then((r) => expect(r.body.revoked).toBe(mandateId));
+
+    await request(http)
+      .post('/agent/activity')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ riskId: risk, title: 'After revocation' })
+      .expect(403);
+  });
+
+  it('refuses to revoke a mandate for an organisation that is not its principal', async () => {
+    const { mandateId } = await bootstrapAgent(['activity.submit'], 1_000_00);
+    const other = await identity.createOrganisation({
+      id: `org-not-principal-${Math.random().toString(36).slice(2, 8)}`,
+      legalName: 'Not The Principal',
+      kind: 'COMPANY',
+      jurisdiction: 'ZA',
+    });
+    const { keyId, secret, salt } = generateCredential();
+    await identity.createCredential({
+      id: `cred-${other.id}`,
+      keyId,
+      secretHash: hashSecret(secret, salt),
+      secretSalt: salt,
+      organisationId: other.id,
+      label: 'not-principal-test',
+      scopes: ['*'],
+      subjectKind: 'SERVICE',
+      expiresAt: null,
+    });
+
+    await request(http)
+      .post(`/identity/mandates/${mandateId}/revoke`)
+      .set('Authorization', `Bearer ${keyId}.${secret}`)
       .expect(403);
   });
 

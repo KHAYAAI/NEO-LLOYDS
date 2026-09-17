@@ -233,7 +233,7 @@ export class PrismaIdentityRepository implements IdentityRepository {
     });
   }
 
-  async createMandate(mandate: AgentMandate & { id: string }): Promise<AgentMandate> {
+  async createMandate(mandate: AgentMandate): Promise<AgentMandate> {
     await this.prisma.agentMandate.create({
       data: {
         id: mandate.id,
@@ -248,6 +248,29 @@ export class PrismaIdentityRepository implements IdentityRepository {
     return mandate;
   }
 
+  async findMandateById(id: string): Promise<AgentMandate | undefined> {
+    const row = await this.prisma.agentMandate.findUnique({ where: { id } });
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      agentOrganisationId: row.agentOrganisationId,
+      principalOrganisationId: row.principalOrganisationId,
+      permittedActions: row.permittedActions,
+      maxTransactionValueMinor: Number(row.maxTransactionValueMinor),
+      currency: row.currency,
+      expiresAt: row.expiresAt.toISOString(),
+    };
+  }
+
+  async revokeMandate(id: string): Promise<void> {
+    // Idempotent by construction: setting revokedAt on an already-revoked row
+    // (or a non-existent one) is a silent no-op, same shape as revokeCredential.
+    await this.prisma.agentMandate.updateMany({
+      where: { id },
+      data: { revokedAt: new Date() },
+    });
+  }
+
   async findActiveMandate(agentOrganisationId: string): Promise<AgentMandate | undefined> {
     const row = await this.prisma.agentMandate.findFirst({
       where: { agentOrganisationId, revokedAt: null },
@@ -255,6 +278,7 @@ export class PrismaIdentityRepository implements IdentityRepository {
     });
     if (!row) return undefined;
     return {
+      id: row.id,
       agentOrganisationId: row.agentOrganisationId,
       principalOrganisationId: row.principalOrganisationId,
       permittedActions: row.permittedActions,

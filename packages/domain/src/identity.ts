@@ -41,6 +41,7 @@ export interface Organisation {
  * a subset of its principal's, and always bounded and expiring.
  */
 export interface AgentMandate {
+  readonly id: string;
   readonly agentOrganisationId: string;
   readonly principalOrganisationId: string;
   readonly permittedActions: readonly string[];

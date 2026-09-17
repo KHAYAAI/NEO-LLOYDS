@@ -72,8 +72,11 @@ export interface IdentityRepository {
   findCredentialByKeyId(keyId: string): Promise<StoredCredential | undefined>;
   revokeCredential(keyId: string): Promise<void>;
 
-  createMandate(mandate: AgentMandate & { id: string }): Promise<AgentMandate>;
+  createMandate(mandate: AgentMandate): Promise<AgentMandate>;
   findActiveMandate(agentOrganisationId: string): Promise<AgentMandate | undefined>;
+  findMandateById(id: string): Promise<AgentMandate | undefined>;
+  /** The "kill switch": invalidates a mandate before its expiry. Idempotent. */
+  revokeMandate(id: string): Promise<void>;
 
   createUser(input: Omit<StoredUser, 'active'>): Promise<StoredUser>;
   findUserByOidcSubject(issuer: string, subject: string): Promise<StoredUser | undefined>;

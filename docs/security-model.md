@@ -189,9 +189,30 @@ None of the remaining items are closable by more code alone:
   fake session URL sent to a real signatory would be actively misleading,
   unlike an honest "not screened" result, so `createSession()` throws
   when unconfigured instead. Completing the loop — learning a session's
-  outcome — needs a webhook receiver, which does not exist anywhere in
-  this codebase yet; that is real, separate work this section does not
-  claim to have done.
+  outcome — now has a real webhook receiver: `POST
+  /compliance/webhooks/didit` (`apps/api/src/compliance/compliance.controller.ts`),
+  authenticated by an HMAC-SHA256 signature over the raw request body
+  (`X-Signature` header) rather than a bearer credential, since Didit
+  cannot present one of this API's own. The payload shape and signing
+  scheme are not guessed: confirmed live by pointing a real webhook
+  destination at a public test endpoint and reading back the actual
+  delivery through Didit's own tooling (`apps/api/src/compliance/didit.ts`'s
+  `DiditWebhookPayload`/`verifyDiditWebhookSignature` doc comments have the
+  detail). The receiver records every event to the audit log; it
+  deliberately does **not** change `kybStatus` itself — same rule as
+  `runComplianceChecks` above, a provider result is recorded, never
+  auto-applied as a decision.
+- **Agent mandate revocation (the "kill switch").** Phase 11's
+  `AgentMandate` system could previously only expire on its own
+  `expiresAt`; there was no way to invalidate one early. `POST
+  /identity/mandates/:id/revoke` closes that: only the mandate's issuing
+  principal organisation may call it, and revocation is effective
+  immediately, not eventually — `assertAgentMayAct`'s mandate is resolved
+  fresh on every request via `findActiveMandate` (`common/auth.ts`), which
+  now excludes revoked mandates, so there is no cache or session token to
+  separately invalidate. Covered by an e2e test that mandates an agent,
+  lets it act, revokes the mandate mid-flight, and confirms the next
+  identical request is refused with 403.
 - **An HSM/secrets manager** (AWS KMS/Secrets Manager, HashiCorp Vault,
   GCP Secret Manager) is an infrastructure choice tied to wherever this is
   actually deployed; picking one before a deployment target exists would be

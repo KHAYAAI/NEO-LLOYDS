@@ -176,6 +176,17 @@ export class IdentityController {
     return { mandate: await this.identity.createMandate(auth(req), body) };
   }
 
+  @Post('mandates/:id/revoke')
+  @RequireScopes('identity:admin')
+  @ApiOperation({
+    summary:
+      "Kill switch: invalidate an agent's mandate before its expiry. Only the issuing principal organisation may call this.",
+  })
+  async revokeMandate(@Req() req: RequestWithAuth, @Param('id') id: string) {
+    await this.identity.revokeMandate(auth(req), id);
+    return { revoked: id };
+  }
+
   @Get('audit')
   @RequireScopes('audit:read')
   @ApiOperation({ summary: 'Read the append-only audit log' })

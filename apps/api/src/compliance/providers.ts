@@ -190,11 +190,14 @@ export function createWalletScreeningProvider(): WalletScreeningProvider {
  * server can complete in one request/response, but a human has to
  * actually go photograph a document or connect their bank, so the only
  * thing a server can do synchronously is start the session and hand back
- * a URL. **Completing the loop — learning the outcome — needs a webhook
- * receiver, which does not exist anywhere in this codebase yet
- * (confirmed: no route grep-matches "webhook" outside
- * apps/api/src/settlement's doc comments).** That is real, separate work,
- * not implied by this interface's existence.
+ * a URL. Completing the loop — learning the outcome — needs a webhook
+ * receiver: `POST /compliance/webhooks/didit`
+ * (`apps/api/src/compliance/compliance.controller.ts`), verified against
+ * Didit's real webhook delivery shape and HMAC signature scheme (see
+ * `verifyDiditWebhookSignature` in `./didit.js`). It records what Didit
+ * reports to the audit log; same as `KybProvider`/`SanctionsProvider`
+ * above, it does not itself change any `kybStatus` — that stays an
+ * explicit admin action.
  */
 export interface VerificationSession {
   readonly providerId: string;

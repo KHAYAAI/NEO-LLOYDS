@@ -56,7 +56,7 @@ import type {
 export class InMemoryIdentityRepository implements IdentityRepository {
   private readonly organisations = new Map<string, Organisation>();
   private readonly credentials = new Map<string, StoredCredential>();
-  private readonly mandates = new Map<string, AgentMandate>();
+  private readonly mandates = new Map<string, AgentMandate & { revokedAt: Date | null }>();
   private readonly users = new Map<string, StoredUser>();
 
   async createOrganisation(input: {
@@ -128,9 +128,21 @@ export class InMemoryIdentityRepository implements IdentityRepository {
     if (credential) credential.revokedAt = new Date();
   }
 
-  async createMandate(mandate: AgentMandate & { id: string }): Promise<AgentMandate> {
-    this.mandates.set(mandate.agentOrganisationId, mandate);
+  async createMandate(mandate: AgentMandate): Promise<AgentMandate> {
+    this.mandates.set(mandate.id, { ...mandate, revokedAt: null });
     return mandate;
+  }
+
+  async findMandateById(id: string): Promise<AgentMandate | undefined> {
+    const mandate = this.mandates.get(id);
+    if (!mandate) return undefined;
+    const { revokedAt: _revokedAt, ...rest } = mandate;
+    return rest;
+  }
+
+  async revokeMandate(id: string): Promise<void> {
+    const mandate = this.mandates.get(id);
+    if (mandate) mandate.revokedAt = new Date();
   }
 
   async createUser(input: Omit<StoredUser, 'active'>): Promise<StoredUser> {
@@ -144,7 +156,18 @@ export class InMemoryIdentityRepository implements IdentityRepository {
   }
 
   async findActiveMandate(agentOrganisationId: string): Promise<AgentMandate | undefined> {
-    return this.mandates.get(agentOrganisationId);
+    // Multiple mandates may exist per agent (one per createMandate call); the
+    // most recently inserted non-revoked one wins, mirroring the Prisma
+    // adapter's `orderBy: createdAt desc` + `revokedAt: null` query.
+    let latest: (AgentMandate & { revokedAt: Date | null }) | undefined;
+    for (const mandate of this.mandates.values()) {
+      if (mandate.agentOrganisationId === agentOrganisationId && !mandate.revokedAt) {
+        latest = mandate;
+      }
+    }
+    if (!latest) return undefined;
+    const { revokedAt: _revokedAt, ...rest } = latest;
+    return rest;
   }
 }
 

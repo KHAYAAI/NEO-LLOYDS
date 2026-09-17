@@ -162,6 +162,7 @@ describe('agents cannot exceed their mandate (security-model.md §4)', () => {
   };
 
   const mandate: AgentMandate = {
+    id: 'mandate-1',
     agentOrganisationId: 'org-agent',
     principalOrganisationId: 'org-principal',
     permittedActions: ['risk.submit'],

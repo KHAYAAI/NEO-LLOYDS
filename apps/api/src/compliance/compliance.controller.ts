@@ -1,10 +1,13 @@
-import { Body, Controller, Inject, Post, Req } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, Inject, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsString } from 'class-validator';
+import type { Request } from 'express';
 import type { AuthContext } from '@neo-lloyds/domain';
-import { RequireScopes, type RequestWithAuth } from '../common/auth.js';
+import { Public, RequireScopes, type RequestWithAuth } from '../common/auth.js';
+import { AuditService } from '../common/audit.service.js';
 import { WALLET_SCREENING_PROVIDER, VERIFICATION_SESSION_PROVIDER } from './tokens.js';
 import type { VerificationSessionProvider, WalletScreeningProvider } from './providers.js';
+import { verifyDiditWebhookSignature, type DiditWebhookPayload } from './didit.js';
 
 class WalletScreeningDto {
   @IsString() walletAddress: string;
@@ -37,6 +40,7 @@ export class ComplianceController {
   constructor(
     @Inject(WALLET_SCREENING_PROVIDER) private readonly walletScreening: WalletScreeningProvider,
     @Inject(VERIFICATION_SESSION_PROVIDER) private readonly verificationSessions: VerificationSessionProvider,
+    @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
   @Post('wallet-screening')
@@ -59,5 +63,71 @@ export class ComplianceController {
   async createVerificationSession(@Req() req: RequestWithAuth, @Body() body: VerificationSessionDto) {
     auth(req);
     return { session: await this.verificationSessions.createSession(body) };
+  }
+
+  /**
+   * Receives Didit verification-session status changes. `@Public()` because
+   * Didit cannot present one of this API's own bearer credentials — the
+   * HMAC signature below IS the authentication, same strength requirement,
+   * different mechanism (this is the same shape as Stripe's webhook
+   * signing, not a weaker substitute for a credential).
+   *
+   * `vendor_data` is expected to be the caller's organisationId, by
+   * convention only — this server does not itself set it, whatever value
+   * was passed as `vendorData` to POST /compliance/verification-sessions
+   * is what comes back here. If a caller didn't set it to an
+   * organisationId, the audit record below still gets written (never
+   * silently dropped) with whatever string Didit echoes back, or `null`.
+   *
+   * Deliberately does not touch `kybStatus`: same rule as
+   * `KybProvider`/`SanctionsProvider` (providers.ts's doc comment) — a
+   * provider result is recorded, never auto-applied as a decision. Turning
+   * "Didit says Approved" into an actual status change is a real feature
+   * this endpoint does not implement; do it as an explicit follow-up read
+   * of the audit log, not an inference from this handler having run.
+   */
+  @Public()
+  @Post('webhooks/didit')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Didit webhook receiver for verification-session status changes. Authenticated by HMAC-SHA256 signature (X-Signature header) over the raw body, not a bearer credential.',
+  })
+  async diditWebhook(
+    @Req() req: Request & { rawBody?: Buffer },
+    @Headers('x-signature') signature?: string,
+  ) {
+    const secret = process.env['DIDIT_WEBHOOK_SECRET'];
+    if (!secret) {
+      throw new Error(
+        'DIDIT_WEBHOOK_SECRET is not configured -- cannot verify incoming Didit webhooks. ' +
+          'Get it from the webhook destination in your Didit dashboard and set it.',
+      );
+    }
+    if (!req.rawBody || !verifyDiditWebhookSignature(req.rawBody, signature, secret)) {
+      throw new UnauthorizedException('Invalid webhook signature');
+    }
+
+    const payload = JSON.parse(req.rawBody.toString('utf8')) as DiditWebhookPayload;
+
+    const systemCtx: AuthContext = {
+      organisationId: payload.vendor_data ?? 'unknown',
+      subjectId: 'didit-webhook',
+      subjectKind: 'SERVICE',
+      roles: [],
+      scopes: [],
+    };
+
+    await this.audit.record({
+      ctx: systemCtx,
+      action: 'compliance.verification-session.webhook',
+      subjectType: 'VerificationSession',
+      subjectId: payload.session_id,
+      decision: 'ALLOWED',
+      reason: `Didit ${payload.webhook_type}: status=${payload.status}`,
+      after: payload,
+    });
+
+    return { received: true };
   }
 }

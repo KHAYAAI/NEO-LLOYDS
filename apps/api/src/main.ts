@@ -10,7 +10,13 @@ import { SimulationNoticeInterceptor } from './common/simulation.interceptor.js'
 import { hardenApp } from './common/harden.js';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot());
+  // rawBody: true keeps req.rawBody available (exact bytes, not re-serialised)
+  // alongside the normal parsed body -- needed to verify the Didit webhook's
+  // HMAC signature in compliance.controller.ts, which is computed over the
+  // raw request bytes.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(), {
+    rawBody: true,
+  });
 
   hardenApp(app);
 

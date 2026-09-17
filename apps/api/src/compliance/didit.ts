@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { KybCheckResult, KybProvider, KybVerdict } from './providers.js';
 import type { SanctionsHit, SanctionsProvider, SanctionsScreeningResult } from './providers.js';
 import type { WalletScreeningProvider, WalletScreeningResult } from './providers.js';
@@ -372,4 +373,76 @@ export function createDiditVerificationSessionProviderFromEnv(
     );
   }
   return new DiditVerificationSessionProvider(apiKey, createUrl);
+}
+
+/**
+ * The webhook receiver this file's own doc comment (above,
+ * `createSession`) previously flagged as missing: "no route grep-matches
+ * 'webhook' outside apps/api/src/settlement's doc comments." Payload shape
+ * and signing scheme below are not guessed -- confirmed live through
+ * Didit's own MCP connector: a webhook destination was pointed at
+ * https://httpbin.org/post (a real, publicly reachable endpoint, not a
+ * mock), a real sandbox session created against the same "Neo-Lloyds
+ * Signatory KYC" workflow used elsewhere in this file
+ * (workflow_id 477652f9-44b7-4242-b9c4-76bb536d7be9), and
+ * `didit_session_webhooks` then returned the actual delivered request:
+ * headers `X-Signature` (64 lowercase hex chars = a 32-byte digest) and
+ * `X-Timestamp` (unix seconds), and a JSON body with exactly the fields
+ * `DiditWebhookPayload` below declares. `X-Signature` was confirmed to be
+ * HMAC-SHA256 of the raw request body (not body+timestamp concatenated,
+ * per the MCP tool's own description of what a receiver's check must do)
+ * -- `verifyDiditWebhookSignature` implements exactly that, compared in
+ * constant time the same way `secretMatches` in common/auth.ts does for
+ * API credentials. The destination and test sessions used to confirm this
+ * were deleted afterwards; nothing here depends on them still existing.
+ *
+ * What is NOT verified: the payload shape for a *terminal* status
+ * (`status: "Approved"`/`"Declined"`) -- the confirmed delivery above was
+ * the session-creation event (`status: "Not Started"`), because advancing
+ * a sandbox session to Approved requires actually completing the hosted
+ * flow at its `url`, not just setting `sandbox_scenario`. The fields this
+ * type declares are the ones Didit's own delivery included; a real
+ * `decision` payload may carry more, so unknown fields are preserved via
+ * `[key: string]: unknown` and not assumed absent.
+ */
+export interface DiditWebhookPayload {
+  readonly application_id: string;
+  readonly created_at: number;
+  readonly environment: 'sandbox' | 'live';
+  readonly event_id: string;
+  readonly sandbox_scenario?: string;
+  readonly session_id: string;
+  readonly status: string;
+  readonly timestamp: number;
+  readonly vendor_data: string | null;
+  readonly webhook_type: string;
+  readonly workflow_id: string;
+  readonly workflow_version: number;
+  readonly [key: string]: unknown;
+}
+
+/**
+ * `rawBody` must be the exact bytes Didit sent -- not a re-serialised
+ * `JSON.stringify` of the parsed object, which can differ in key order or
+ * whitespace and would make a correct signature fail to verify. Nest's
+ * `rawBody: true` bootstrap option (apps/api/src/main.ts) is what makes
+ * that exact buffer available on the request.
+ */
+export function verifyDiditWebhookSignature(
+  rawBody: Buffer,
+  signatureHeader: string | undefined,
+  secret: string,
+): boolean {
+  if (!signatureHeader) return false;
+
+  let expected: Buffer;
+  let actual: Buffer;
+  try {
+    expected = createHmac('sha256', secret).update(rawBody).digest();
+    actual = Buffer.from(signatureHeader, 'hex');
+  } catch {
+    return false;
+  }
+
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
