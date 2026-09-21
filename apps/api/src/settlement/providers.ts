@@ -1,5 +1,6 @@
 import type { SettlementMethod } from '@neo-lloyds/domain';
 import { createStripeSettlementProviderFromEnv } from './stripe.js';
+import { createOpenFireblocksSettlementProviderFromEnv } from './openfireblocks.js';
 
 /**
  * The `SettlementProvider` port: what actually moves money for a given
@@ -53,16 +54,56 @@ export class NullSettlementProvider implements SettlementProvider {
 }
 
 /**
+ * Routes by settlement method rather than picking one provider for
+ * everything: STABLECOIN goes to OpenFireblocks when configured (the only
+ * provider in this codebase that can move it at all -- Stripe refuses it
+ * outright), every other method goes to the fallback (Stripe, or Null).
+ * `SettlementService` never sees this split -- it calls one
+ * `SettlementProvider`, same as before this router existed.
+ */
+export class CompositeSettlementProvider implements SettlementProvider {
+  readonly providerId: string;
+
+  constructor(
+    private readonly stablecoinProvider: SettlementProvider | undefined,
+    private readonly fallbackProvider: SettlementProvider,
+  ) {
+    this.providerId = `composite(${stablecoinProvider?.providerId ?? 'none'}+${fallbackProvider.providerId})`;
+  }
+
+  async submit(input: {
+    transactionId: string;
+    method: SettlementMethod;
+    amountMinor: number;
+    currency: string;
+    destinationAccountId?: string;
+  }) {
+    if (input.method === 'STABLECOIN' && this.stablecoinProvider) {
+      return this.stablecoinProvider.submit(input);
+    }
+    return this.fallbackProvider.submit(input);
+  }
+}
+
+/**
  * Wiring order: a real Stripe adapter first when `STRIPE_API_KEY` is set
  * (apps/api/src/settlement/stripe.ts — built against Stripe's own
  * installed Node SDK source as ground truth, the same technique used for
  * WorkOS's JWKS URL earlier in this project), then the honest Null
- * fallback. No "key set but no adapter" throw is needed here the way
- * compliance/providers.ts has one — Stripe is the one real adapter this
- * port has, and its own factory already validates its own configuration.
+ * fallback for everything Stripe or nothing else handles. Separately, a
+ * real OpenFireblocks adapter (apps/api/src/settlement/openfireblocks.ts —
+ * built against OpenFireblocks' own source, self-hosted, not a third-party
+ * vendor) is layered on top for STABLECOIN specifically, since neither
+ * Stripe nor the Null provider can move it for real. No "key set but no
+ * adapter" throw is needed here the way compliance/providers.ts has one —
+ * each real adapter's own factory already validates its own configuration.
  */
 export function createSettlementProvider(): SettlementProvider {
   const stripe = createStripeSettlementProviderFromEnv();
-  if (stripe) return stripe;
-  return new NullSettlementProvider();
+  const fallback = stripe ?? new NullSettlementProvider();
+
+  const openFireblocks = createOpenFireblocksSettlementProviderFromEnv();
+  if (openFireblocks) return new CompositeSettlementProvider(openFireblocks, fallback);
+
+  return fallback;
 }

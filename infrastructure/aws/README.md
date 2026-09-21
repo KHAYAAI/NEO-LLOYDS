@@ -124,16 +124,22 @@ already used for Staging) and set `NEXT_PUBLIC_WORKOS_REDIRECT_URI`
 per-portal accordingly.
 
 ### 7. Real settlement, KYB/KYC, sanctions screening — now partially done
-`SettlementProvider` (Stripe Connect Transfers), `KybProvider` and
-`SanctionsProvider` (both Didit) all have real adapters now, not just
-interfaces waiting for one — see `docs/security-model.md` §8 for exactly
-what each does and doesn't cover. What's still needed from you: a real
-Stripe account with `STRIPE_API_KEY` set, and — separately — a way to
-onboard each capital provider onto Stripe Connect so a real
-`destinationAccountId` exists to pay out to (nothing in Neo-Lloyds does
-that yet). `STABLECOIN` settlement and Didit's Bank Verification add-on
-(confirmed live to be disabled on the connected account) remain
-unbuilt/unavailable.
+`SettlementProvider` (Stripe Connect Transfers for fiat, OpenFireblocks for
+`STABLECOIN`), `KybProvider` and `SanctionsProvider` (both Didit) all have
+real adapters now, not just interfaces waiting for one — see
+`docs/security-model.md` §8 for exactly what each does and doesn't cover.
+What's still needed from you: a real Stripe account with `STRIPE_API_KEY`
+set, and — separately — a way to onboard each capital provider onto
+Stripe Connect so a real `destinationAccountId` exists to pay out to
+(nothing in Neo-Lloyds does that yet); for `STABLECOIN`, a running
+OpenFireblocks instance (`OPENFIREBLOCKS_API_KEY`/`_BASE_URL`/
+`_STABLECOIN_TOKENS`) — tested against its own local `docker-compose`
+stack, not this deployment's Docker (unavailable in the authoring
+sandbox). OpenFireblocks' own MVP is testnet-pilot-ready, not
+mainnet-custody-ready yet (its own `docs/readiness-brief.md` says so
+plainly) — treat `STABLECOIN` settlement as testnet-only until that
+changes. Didit's Bank Verification add-on (confirmed live to be disabled
+on the connected account) remains unavailable.
 
 ### 8. A real penetration test
 `security-scan.yml` (Shannon) is a genuine, real automated scanner — not

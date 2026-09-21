@@ -125,6 +125,33 @@ None of the remaining items are closable by more code alone:
   from this repository — the request/response shapes are typed against
   Stripe's own published TypeScript definitions, which is strong evidence,
   not a substitute for one real call.
+- **`STABLECOIN` now has a real adapter too, closing the one rail Stripe
+  explicitly refuses — OpenFireblocks (`github.com/KHAYAAI/openfireblocks`,
+  a sovereign, self-hosted MPC signing/settlement platform, not a
+  third-party vendor).** `apps/api/src/settlement/openfireblocks.ts`
+  encodes a real ERC-20 `transfer(address,uint256)` call and submits it
+  through OpenFireblocks' own durable `/settlements` workflow (policy →
+  sign → broadcast → monitor, with a human-approval gate for high-value
+  transactions) — request/response shapes read directly from
+  OpenFireblocks' own source (`SignRequestDto`, `TemporalService`, the Go
+  `TransactionResult` struct's own json tags), not guessed. A
+  `CompositeSettlementProvider` routes `STABLECOIN` to it and everything
+  else to Stripe/Null, so `SettlementService` still calls exactly one
+  provider, unaware of the split. Two honest limits, stated plainly:
+  (1) never run against a live OpenFireblocks instance — its own
+  `docker compose` stack needs a Docker daemon unavailable in this
+  sandbox; (2) `SettlementService.initiate` is a synchronous call chain,
+  while OpenFireblocks' settlement workflow is asynchronous by design (up
+  to an hour waiting on approval) — this adapter bridges that with a
+  bounded poll (default 60s) and reports an honest "not yet terminal"
+  result rather than blocking the request for an hour or fabricating a
+  result it doesn't have. And OpenFireblocks itself is equally plain about
+  its own readiness: its MVP still signs with a single shared key (real
+  k-of-n MPC party distribution is its own Phase 2), and it states outright
+  it is "not yet cleared to custody or move customer funds on mainnet"
+  (its own `docs/readiness-brief.md`) — the plan here is a testnet pilot
+  now, mainnet only once OpenFireblocks clears its own party-distribution
+  and external-audit checklist, tracked in that repository, not this one.
 - **Both KYB and sanctions screening are now real for one vendor
   (Didit).** `apps/api/src/compliance/didit.ts` has two working adapters,
   not stubs: `DiditKybProvider` (registry lookup) and
