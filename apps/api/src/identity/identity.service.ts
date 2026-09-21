@@ -9,8 +9,11 @@ import {
 } from '@neo-lloyds/domain';
 import { isConfiguredJurisdiction } from '@neo-lloyds/config';
 import {
+  CLOCK,
   IDENTITY_REPOSITORY,
+  type Clock,
   type IdentityRepository,
+  type StoredMandate,
 } from '../persistence/ports.js';
 import { AuditService } from '../common/audit.service.js';
 import { generateCredential, hashSecret } from '../common/auth.js';
@@ -26,6 +29,7 @@ export class IdentityService {
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(KYB_PROVIDER) private readonly kybProvider: KybProvider,
     @Inject(SANCTIONS_PROVIDER) private readonly sanctionsProvider: SanctionsProvider,
+    @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
   async createOrganisation(
@@ -373,6 +377,35 @@ export class IdentityService {
       reason: 'Agent mandate revoked by principal',
       policy: 'AGENT_MANDATE',
     });
+  }
+
+  /**
+   * The Mandate Control Center's read model (admin-portal): every mandate
+   * this organisation, as principal, has ever issued to an agent it
+   * controls -- active, expired, or revoked, newest first. `status` is
+   * computed here rather than stored, so it's always consistent with the
+   * same `expiresAt`/`revokedAt` fields `assertAgentMayAct` and
+   * `findActiveMandate` actually check, never a second source of truth
+   * that could drift from enforcement.
+   */
+  async listMandates(ctx: AuthContext): Promise<
+    (StoredMandate & { agentLegalName: string; status: 'ACTIVE' | 'EXPIRED' | 'REVOKED' })[]
+  > {
+    const mandates = await this.repository.listMandatesByPrincipal(ctx.organisationId);
+    const now = this.clock.now();
+
+    const agentIds = [...new Set(mandates.map((m) => m.agentOrganisationId))];
+    const agents = new Map(
+      (await Promise.all(agentIds.map((id) => this.repository.findOrganisation(id)))).map(
+        (org, i) => [agentIds[i], org] as const,
+      ),
+    );
+
+    return mandates.map((mandate) => ({
+      ...mandate,
+      agentLegalName: agents.get(mandate.agentOrganisationId)?.legalName ?? mandate.agentOrganisationId,
+      status: mandate.revokedAt ? 'REVOKED' : Date.parse(mandate.expiresAt) <= now.getTime() ? 'EXPIRED' : 'ACTIVE',
+    }));
   }
 
   async getOrganisation(id: string): Promise<Organisation> {

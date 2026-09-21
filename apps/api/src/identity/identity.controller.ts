@@ -176,6 +176,16 @@ export class IdentityController {
     return { mandate: await this.identity.createMandate(auth(req), body) };
   }
 
+  @Get('mandates')
+  @RequireScopes('identity:admin')
+  @ApiOperation({
+    summary:
+      "The Mandate Control Center read model: every mandate the caller's organisation has issued as principal, with a computed ACTIVE/EXPIRED/REVOKED status and the agent's legal name resolved.",
+  })
+  async listMandates(@Req() req: RequestWithAuth) {
+    return { mandates: await this.identity.listMandates(auth(req)) };
+  }
+
   @Post('mandates/:id/revoke')
   @RequireScopes('identity:admin')
   @ApiOperation({

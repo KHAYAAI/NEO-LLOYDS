@@ -55,6 +55,12 @@ export interface StoredUser {
   oidcSubject: string | null;
 }
 
+/** An AgentMandate with the bookkeeping fields a list/detail UI needs but the domain type itself deliberately omits (packages/domain/src/identity.ts's AgentMandate is what assertAgentMayAct actually checks; createdAt/revokedAt are presentation, not authorization, concerns). */
+export interface StoredMandate extends AgentMandate {
+  readonly createdAt: Date;
+  readonly revokedAt: Date | null;
+}
+
 export interface IdentityRepository {
   createOrganisation(input: {
     id: string;
@@ -78,6 +84,8 @@ export interface IdentityRepository {
   findMandateById(id: string): Promise<AgentMandate | undefined>;
   /** The "kill switch": invalidates a mandate before its expiry. Idempotent. */
   revokeMandate(id: string): Promise<void>;
+  /** Every mandate a principal has ever issued (any agent, any status), newest first — the admin-portal Mandate Control Center's read model. */
+  listMandatesByPrincipal(principalOrganisationId: string): Promise<StoredMandate[]>;
 
   createUser(input: Omit<StoredUser, 'active'>): Promise<StoredUser>;
   findUserByOidcSubject(issuer: string, subject: string): Promise<StoredUser | undefined>;

@@ -36,6 +36,7 @@ import type {
   StoredUser,
   StoredInterest,
   StoredListing,
+  StoredMandate,
   StoredReinsuranceCession,
   StoredReinsuranceProgram,
   StoredSettlementTransaction,
@@ -56,7 +57,7 @@ import type {
 export class InMemoryIdentityRepository implements IdentityRepository {
   private readonly organisations = new Map<string, Organisation>();
   private readonly credentials = new Map<string, StoredCredential>();
-  private readonly mandates = new Map<string, AgentMandate & { revokedAt: Date | null }>();
+  private readonly mandates = new Map<string, AgentMandate & { createdAt: Date; revokedAt: Date | null }>();
   private readonly users = new Map<string, StoredUser>();
 
   async createOrganisation(input: {
@@ -129,20 +130,26 @@ export class InMemoryIdentityRepository implements IdentityRepository {
   }
 
   async createMandate(mandate: AgentMandate): Promise<AgentMandate> {
-    this.mandates.set(mandate.id, { ...mandate, revokedAt: null });
+    this.mandates.set(mandate.id, { ...mandate, createdAt: new Date(), revokedAt: null });
     return mandate;
   }
 
   async findMandateById(id: string): Promise<AgentMandate | undefined> {
     const mandate = this.mandates.get(id);
     if (!mandate) return undefined;
-    const { revokedAt: _revokedAt, ...rest } = mandate;
+    const { createdAt: _createdAt, revokedAt: _revokedAt, ...rest } = mandate;
     return rest;
   }
 
   async revokeMandate(id: string): Promise<void> {
     const mandate = this.mandates.get(id);
     if (mandate) mandate.revokedAt = new Date();
+  }
+
+  async listMandatesByPrincipal(principalOrganisationId: string): Promise<StoredMandate[]> {
+    return [...this.mandates.values()]
+      .filter((m) => m.principalOrganisationId === principalOrganisationId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
   async createUser(input: Omit<StoredUser, 'active'>): Promise<StoredUser> {

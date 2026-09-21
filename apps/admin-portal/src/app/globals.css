@@ -103,6 +103,11 @@ a {
   color: var(--nl-text);
 }
 
+.nl-button-danger {
+  background: var(--nl-danger);
+  color: white;
+}
+
 .nl-error {
   color: var(--nl-danger);
   font-size: 13px;
@@ -145,6 +150,9 @@ a {
 .nl-badge-scored,
 .nl-badge-ready_for_underwriting { color: var(--nl-accent); border-color: var(--nl-accent); }
 .nl-badge-open { color: var(--nl-ok); border-color: var(--nl-ok); }
+.nl-badge-active { color: var(--nl-ok); border-color: var(--nl-ok); }
+.nl-badge-expired { color: var(--nl-muted); }
+.nl-badge-revoked { color: var(--nl-danger); border-color: var(--nl-danger); }
 
 .nl-muted {
   color: var(--nl-muted);

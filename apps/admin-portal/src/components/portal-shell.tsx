@@ -12,6 +12,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
         </h1>
         <nav style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
           <Link href="/dashboard">Organisations</Link>
+          <Link href="/mandates">Mandates</Link>
           <Link href="/audit">Audit log</Link>
           <Link href="/jurisdictions">Jurisdictions</Link>
           <form action={logout}>

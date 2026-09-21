@@ -37,6 +37,7 @@ import type {
   StoredClaim,
   StoredClaimPayout,
   StoredCredential,
+  StoredMandate,
   StoredUser,
   StoredInterest,
   StoredListing,
@@ -269,6 +270,24 @@ export class PrismaIdentityRepository implements IdentityRepository {
       where: { id },
       data: { revokedAt: new Date() },
     });
+  }
+
+  async listMandatesByPrincipal(principalOrganisationId: string): Promise<StoredMandate[]> {
+    const rows = await this.prisma.agentMandate.findMany({
+      where: { principalOrganisationId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      agentOrganisationId: row.agentOrganisationId,
+      principalOrganisationId: row.principalOrganisationId,
+      permittedActions: row.permittedActions,
+      maxTransactionValueMinor: Number(row.maxTransactionValueMinor),
+      currency: row.currency,
+      expiresAt: row.expiresAt.toISOString(),
+      createdAt: row.createdAt,
+      revokedAt: row.revokedAt,
+    }));
   }
 
   async findActiveMandate(agentOrganisationId: string): Promise<AgentMandate | undefined> {

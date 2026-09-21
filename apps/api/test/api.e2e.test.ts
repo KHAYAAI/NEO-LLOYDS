@@ -2146,6 +2146,50 @@ describe('Phase 11: AI Agent API', () => {
       .expect(403);
   });
 
+  it('lists every mandate a principal has issued, with a computed status and the agent\'s legal name resolved', async () => {
+    const { token, agentOrgId, mandateId } = await bootstrapAgent(['activity.submit'], 1_000_00);
+
+    const before = await request(http)
+      .get('/identity/mandates')
+      .set('Authorization', `Bearer ${rootToken}`)
+      .expect(200);
+    const listed = before.body.mandates.find((m: { id: string }) => m.id === mandateId);
+    expect(listed).toBeDefined();
+    expect(listed.status).toBe('ACTIVE');
+    expect(listed.agentOrganisationId).toBe(agentOrgId);
+    expect(listed.agentLegalName).toContain('Test Agent');
+    expect(listed.revokedAt).toBeNull();
+
+    await request(http)
+      .post(`/identity/mandates/${mandateId}/revoke`)
+      .set('Authorization', `Bearer ${rootToken}`)
+      .expect(201);
+
+    const after = await request(http)
+      .get('/identity/mandates')
+      .set('Authorization', `Bearer ${rootToken}`)
+      .expect(200);
+    const revoked = after.body.mandates.find((m: { id: string }) => m.id === mandateId);
+    expect(revoked.status).toBe('REVOKED');
+    expect(revoked.revokedAt).not.toBeNull();
+
+    // Use the same token twice for unrelated tests, so keep the agent inert
+    // afterwards -- consistent with the standalone revoke test above.
+    void token;
+  });
+
+  it('never lists a mandate this organisation did not issue as principal', async () => {
+    const { mandateId } = await bootstrapAgent(['activity.submit'], 1_000_00);
+    const other = await bootstrapOrganisation('Mandate List Isolation Org', ['*'], []);
+
+    const response = await request(http)
+      .get('/identity/mandates')
+      .set('Authorization', `Bearer ${other.token}`)
+      .expect(200);
+
+    expect(response.body.mandates.some((m: { id: string }) => m.id === mandateId)).toBe(false);
+  });
+
   it('returns the indicative protection for a risk with an existing assessment, never binding it', async () => {
     const { token } = await bootstrapAgent(['protection.indicative'], 1_000_00);
     const risk = await createNode('RISK', 'agent-protection-risk', token);
